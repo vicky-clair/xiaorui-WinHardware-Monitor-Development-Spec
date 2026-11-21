@@ -1,0 +1,4 @@
+# Force LF line endings for Linux scripts and packaging specs
+*.sh text eol=lf
+*.spec text eol=lf
+*.desktop text eol=lf
