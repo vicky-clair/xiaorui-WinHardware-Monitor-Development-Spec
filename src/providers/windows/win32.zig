@@ -1,19 +1,20 @@
 const std = @import("std");
-const windows = std.os.windows;
+const builtin = @import("builtin");
 
 /// 项目内手写 Win32 API 绑定（规范 §1.1 / Q1）。
 /// 所有结构体布局均依据 Windows SDK 10.0.26100.0 头文件编写，并在文件底部使用 comptime 断言校验。
+/// 非 Windows 平台下仅保留跨平台共用枚举/数据结构定义，Win32 API 符号不会被引用。
 
-pub const HANDLE = windows.HANDLE;
-pub const HWND = windows.HWND;
-pub const HINSTANCE = windows.HINSTANCE;
-pub const HMODULE = windows.HMODULE;
+pub const HANDLE = if (builtin.os.tag == .windows) std.os.windows.HANDLE else *anyopaque;
+pub const HWND = if (builtin.os.tag == .windows) std.os.windows.HWND else *opaque {};
+pub const HINSTANCE = if (builtin.os.tag == .windows) std.os.windows.HINSTANCE else *opaque {};
+pub const HMODULE = if (builtin.os.tag == .windows) std.os.windows.HMODULE else *opaque {};
 pub const HICON = *opaque {};
 pub const HCURSOR = *opaque {};
 pub const HBRUSH = *opaque {};
 pub const HMENU = *opaque {};
 pub const ATOM = u16;
-pub const BOOL = windows.BOOL;
+pub const BOOL = if (builtin.os.tag == .windows) std.os.windows.BOOL else i32;
 pub const DWORD = u32;
 pub const WORD = u16;
 pub const BYTE = u8;
@@ -32,7 +33,7 @@ pub const LPCSTR = [*:0]const u8;
 pub const LPVOID = ?*anyopaque;
 pub const LPCVOID = ?*const anyopaque;
 
-pub const INVALID_HANDLE_VALUE = windows.INVALID_HANDLE_VALUE;
+pub const INVALID_HANDLE_VALUE: HANDLE = if (builtin.os.tag == .windows) std.os.windows.INVALID_HANDLE_VALUE else @ptrFromInt(std.math.maxInt(usize));
 pub const GENERIC_READ: DWORD = 0x80000000;
 pub const GENERIC_WRITE: DWORD = 0x40000000;
 pub const FILE_SHARE_READ: DWORD = 0x00000001;
@@ -732,8 +733,11 @@ pub extern "ole32" fn CoInitializeEx(pvReserved: LPVOID, dwCoInit: DWORD) callco
 pub extern "ole32" fn CoUninitialize() callconv(.winapi) void;
 pub const COINIT_APARTMENTTHREADED: DWORD = 0x2;
 
-/// 检测当前进程是否具有管理员权限
+/// 检测当前进程是否具有管理员 / root 权限
 pub fn isElevated() bool {
+    if (builtin.os.tag != .windows) {
+        return std.os.linux.geteuid() == 0;
+    }
     var token: HANDLE = undefined;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) == 0) return false;
     defer _ = CloseHandle(token);

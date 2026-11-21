@@ -1,9 +1,11 @@
-//! WinHardware Monitor 主程序入口（Windows 10/11 x64）。
-//! 负责解析启动参数（`--smoke-test` 冒烟测试、`--wait-mutex` 管理员重启平滑接管）、
-//! 执行单实例命名互斥体检测，并在通过后启动主渲染窗口与后台硬件监控线程。
+//! WinHardware Monitor 主程序入口（支持 Windows 10/11 x64 与 Linux x86_64）。
+//! 支持桌面 GUI 与无界面 CLI 双运行形态：
+//! - 默认启动桌面 GUI（带单实例保障、深/浅双主题与渲染节能）；
+//! - 传入 `--cli` / `--info` / `--bench <cpu|mem|disk|all>` 时直接进入无界面硬件监测与基准测试模式（无需 X11/OpenGL）。
 const std = @import("std");
 const SingleInstance = @import("platform/single_instance.zig").SingleInstance;
 const window = @import("gui/window.zig");
+const cli = @import("cli.zig");
 
 pub fn main() !void {
     // 通用内存分配器：退出时由 defer 自动检查资源释放
@@ -14,6 +16,9 @@ pub fn main() !void {
     // 解析命令行参数
     var smoke_test = false;
     var wait_mutex = false;
+    var run_cli = false;
+    var cli_opts = cli.CliOptions{};
+
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
     _ = args.next(); // 跳过程序自身路径
@@ -22,7 +27,29 @@ pub fn main() !void {
             smoke_test = true;
         } else if (std.mem.eql(u8, arg, "--wait-mutex")) {
             wait_mutex = true;
+        } else if (std.mem.eql(u8, arg, "--cli") or std.mem.eql(u8, arg, "--info")) {
+            run_cli = true;
+            cli_opts.show_info = true;
+        } else if (std.mem.eql(u8, arg, "--bench")) {
+            run_cli = true;
+            cli_opts.bench_target = args.next() orelse "all";
+        } else if (std.mem.eql(u8, arg, "--duration")) {
+            if (args.next()) |v| cli_opts.duration_s = std.fmt.parseInt(u32, v, 10) catch 10;
+        } else if (std.mem.eql(u8, arg, "--threads")) {
+            if (args.next()) |v| cli_opts.threads = std.fmt.parseInt(u32, v, 10) catch 0;
+        } else if (std.mem.eql(u8, arg, "--mem-mb")) {
+            if (args.next()) |v| cli_opts.mem_mb = std.fmt.parseInt(u32, v, 10) catch 128;
+        } else if (std.mem.eql(u8, arg, "--disk-mb")) {
+            if (args.next()) |v| cli_opts.disk_mb = std.fmt.parseInt(u32, v, 10) catch 128;
+        } else if (std.mem.eql(u8, arg, "--cutoff-c")) {
+            if (args.next()) |v| cli_opts.cutoff_c = std.fmt.parseFloat(f64, v) catch 90.0;
         }
+    }
+
+    // 无界面 CLI 硬件信息与准确基准测试模式（适用于 Linux 服务器 / SSH / 自动化验收）
+    if (run_cli) {
+        try cli.runCli(allocator, cli_opts);
+        return;
     }
 
     // 单实例保障（规范 §2.6；管理员重启时允许最多等待 3 秒旧进程释放互斥体）
@@ -41,7 +68,6 @@ pub fn main() !void {
             }
         }
         if (!acquired) {
-            // 已有实例在运行时将其主窗口激活到前台，然后直接退出
             SingleInstance.activateExistingWindow();
             return;
         }

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### V2.0 (Linux x86_64) - 跨平台原生采集、无界面 CLI 测试与 `.tar.gz`/`.deb`/`.rpm` 多格式打包
+- **新增 Linux 原生硬件采集层（`src/providers/linux/`）**：
+  - `hwmon.zig`：直读内核 `/sys/class/hwmon`（CPU 封装/每核温度、主板温度、风扇、功耗、电压），零驱动即开即用；
+  - `system_info.zig`：采集 `/proc/stat`（总体与每核负载）、`cpufreq` 实时频率、`/proc/meminfo`、`/proc/diskstats`（读写 MB/s & IOPS）、`/sys/class/dmi/id` 主板信息与电池状态；
+  - `gpu_provider.zig`：基于 `/sys/class/drm/card*` 识别 AMD/Intel/NVIDIA GPU 及其 `hwmon` 指标；
+  - `storage.zig`：基于 `/sys/block` 枚举磁盘与稳定 ID，通过 `NVME_IOCTL_ADMIN_CMD` 与标准 `SG_IO` T10 SAT (`0x85` + `0xE5` 防唤醒) 复用现有 SMART 解析器与全部 21 条健康规则。
+- **新增无界面 CLI 硬件检测与烤机模式（`src/cli.zig`）**：支持 `--cli` / `--info` 与 `--bench <cpu|mem|disk|all>`（实时高温熔断 + Linux `posix_fadvise(POSIX_FADV_DONTNEED)` 驱逐页缓存测真实磁盘读速）。
+- **新增 Linux 多格式打包脚本与 CI（`packaging/linux/`）**：支持一键产出 `.tar.gz` 便携包、`.deb`（Debian/Ubuntu）与 `.rpm`（Fedora/RHEL/CentOS/Rocky/openSUSE）及 `SHA256SUMS.txt`，并在 Debian 13 物理主机完成全套编译、打包、SATA/USB 实盘 SMART 读取与烤机实测。
+
 ### V2.0 (Windows) - LHM Bug 修复、深度监控增强与主动硬件测试套件
 - **修复 `WinHardwareMonitor.LhmHelper.exe` 两个核心 Bug**：
   - 将本地命名管道 ACL 细化为“仅当前用户 SID + 显式拒绝网络 + Medium Integrity 完整性标签（`S:(ML;;NW;;;ME)`）”，解决普通权限主程序无法直连管理员权限辅助进程的跨完整性级别访问被拒问题；

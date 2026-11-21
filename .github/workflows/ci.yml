@@ -33,3 +33,27 @@ jobs:
 
       - name: Build Optional MPL-2.0 LHM Helper
         run: dotnet build helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -r win-x64
+
+  linux-build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install X11 / OpenGL dev libs & RPM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev rpm
+
+      - name: Setup Zig 0.15.2
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Run Zig unit tests (Linux x86_64)
+        run: zig build test
+
+      - name: Build ReleaseSafe & package (.tar.gz / .deb / .rpm)
+        run: |
+          chmod +x packaging/linux/build_linux_packages.sh
+          ./packaging/linux/build_linux_packages.sh

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../../providers/windows/win32.zig");
 const sensor = @import("../../core/sensor.zig");
 
@@ -94,6 +95,9 @@ pub fn parseLogPage02(raw: *const [512]u8) NvmeSmartData {
 
 /// 读取指定物理磁盘的 NVMe SMART Log Page 02h 与 Identify Controller WCTEMP/CCTEMP
 pub fn readNvmeSmart(drive_index: u32) NvmeSmartData {
+    if (builtin.os.tag == .linux) {
+        return @import("../../providers/linux/storage.zig").readLinuxNvmeSmart(drive_index);
+    }
     var path_utf8: [64]u8 = undefined;
     const path_slice = std.fmt.bufPrint(&path_utf8, "\\\\.\\PhysicalDrive{d}", .{drive_index}) catch {
         return .{ .status = .transient_error };
@@ -199,6 +203,7 @@ pub const StorageTempDescriptor = struct {
 };
 
 pub fn readStorageTemperature(drive_index: u32) StorageTempDescriptor {
+    if (builtin.os.tag != .windows) return .{};
     var path_utf8: [64]u8 = undefined;
     const path_slice = std.fmt.bufPrint(&path_utf8, "\\\\.\\PhysicalDrive{d}", .{drive_index}) catch return .{};
     var path_w: [65]u16 = undefined;

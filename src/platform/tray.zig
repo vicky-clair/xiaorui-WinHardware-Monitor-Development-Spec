@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../providers/windows/win32.zig");
 
 /// Windows 系统托盘管理（规范 §2.6）。
@@ -20,6 +21,7 @@ pub const TrayIcon = struct {
     }
 
     pub fn recreate(self: *TrayIcon, tooltip_utf8: []const u8) bool {
+        if (builtin.os.tag != .windows) return false;
         const hwnd = self.hwnd orelse return false;
         const tray_cls = std.unicode.utf8ToUtf16LeStringLiteral("Shell_TrayWnd");
         if (win32.FindWindowW(tray_cls, null) == null) {
@@ -41,7 +43,7 @@ pub const TrayIcon = struct {
     }
 
     pub fn updateTooltip(self: *TrayIcon, tooltip_utf8: []const u8) void {
-        if (!self.added) return;
+        if (builtin.os.tag != .windows or !self.added) return;
         const hwnd = self.hwnd orelse return;
         var nid = win32.NOTIFYICONDATAW{
             .hWnd = hwnd,
@@ -54,7 +56,7 @@ pub const TrayIcon = struct {
 
     /// 托盘气泡通知（规范 §2.6 V1 保底桌面通知）
     pub fn showBalloon(self: *TrayIcon, title_utf8: []const u8, body_utf8: []const u8, info_flags: win32.DWORD) void {
-        if (!self.added) return;
+        if (builtin.os.tag != .windows or !self.added) return;
         const hwnd = self.hwnd orelse return;
         var nid = win32.NOTIFYICONDATAW{
             .hWnd = hwnd,
@@ -68,6 +70,7 @@ pub const TrayIcon = struct {
     }
 
     pub fn showContextMenu(self: *TrayIcon, paused: bool) ?usize {
+        if (builtin.os.tag != .windows) return null;
         const hwnd = self.hwnd orelse return null;
         const menu = win32.CreatePopupMenu() orelse return null;
         defer _ = win32.DestroyMenu(menu);
@@ -100,7 +103,7 @@ pub const TrayIcon = struct {
     }
 
     pub fn detach(self: *TrayIcon) void {
-        if (!self.added) return;
+        if (builtin.os.tag != .windows or !self.added) return;
         if (self.hwnd) |hwnd| {
             var nid = win32.NOTIFYICONDATAW{
                 .hWnd = hwnd,

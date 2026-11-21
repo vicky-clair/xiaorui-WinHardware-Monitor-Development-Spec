@@ -1,11 +1,11 @@
 # WinHardware Monitor
 
-一款**轻量、可靠、零默认内核驱动、低资源占用**的 Windows 10 / 11 x64 硬件温度、磁盘健康与硬件稳定性测试桌面软件。
+一款**轻量、可靠、零默认内核驱动、低资源占用**的 **Windows 10/11 x64 与 Linux x86_64 跨平台**硬件温度、磁盘健康与硬件稳定性测试软件（支持**桌面 GUI** 与**无界面 CLI** 双形态）。
 
-- **核心技术栈**：Zig `0.15.2` + `zgui`（Dear ImGui + ImPlot）+ `zglfw` + OpenGL 3.3 Core + SQLite 3.53.2 + 原生 Win32 API
+- **核心技术栈**：Zig `0.15.2` + `zgui`（Dear ImGui + ImPlot）+ `zglfw` + OpenGL 3.3 Core + SQLite 3.53.2 + 原生 Win32 / Linux `hwmon` & `sysfs` & `SG_IO` / `NVME_IOCTL`
 - **设计原则**：**绝不编造硬件数据、绝不将不支持的硬件误报为“正常”、默认零网络访问、默认普通用户即可启动**
 - **详细开发规范**：[WinHardware-Monitor-Development-Spec.md](WinHardware-Monitor-Development-Spec.md)
-- **开源许可**：主程序采用 **Apache-2.0**（[LICENSE](LICENSE)）；可选的 LibreHardwareMonitor 辅助进程以独立可执行文件隔离，遵循 **MPL-2.0**（[helpers/lhm_bridge/LICENSE-MPL-2.0.txt](helpers/lhm_bridge/LICENSE-MPL-2.0.txt)）
+- **开源许可**：主程序采用 **Apache-2.0**（[LICENSE](LICENSE)）；Windows 可选 LibreHardwareMonitor 辅助进程以独立可执行文件隔离，遵循 **MPL-2.0**（[helpers/lhm_bridge/LICENSE-MPL-2.0.txt](helpers/lhm_bridge/LICENSE-MPL-2.0.txt)）
 
 ---
 
@@ -104,8 +104,30 @@ zig build verify-p0
 # 6. 单独发布可选 MPL-2.0 LHM 辅助进程
 dotnet publish helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -r win-x64 -o zig-out/bin
 
-# 7. 一键构建并打包（ReleaseSafe + LHM Helper + 便携版 ZIP + Inno Setup 安装包 + SHA256SUMS.txt）
+# 7. Windows 一键构建并打包（ReleaseSafe + LHM Helper + 便携版 ZIP + Inno Setup 安装包 + SHA256SUMS.txt）
 powershell -NoProfile -ExecutionPolicy Bypass -File packaging/windows/build_release.ps1
+```
+
+### Linux 构建、打包（`.tar.gz` / `.deb` / `.rpm`）与无界面 CLI 测试
+
+Linux 端原生支持内核 `hwmon`（CPU 封装与核心温度、风扇、电压，无需任何第三方驱动）、`DRM/sysfs` GPU、`NVME_IOCTL_ADMIN_CMD` 与 `SG_IO`（SATA / USB T10 SAT SMART）：
+
+```bash
+# 1. 安装编译依赖（Debian/Ubuntu 示例；打包 .rpm 需安装 rpm）
+sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev rpm
+
+# 2. 一键运行测试、构建并打包 .tar.gz（便携版）、.deb 与 .rpm（输出至 dist-linux/）
+ZIG_BIN=zig ./packaging/linux/build_linux_packages.sh
+
+# 3. 安装 .deb 或 .rpm
+sudo dpkg -i dist-linux/winhardware-monitor_0.1.0_amd64.deb
+# 或 Fedora / RHEL / CentOS / Rocky / openSUSE：
+sudo rpm -ivh dist-linux/winhardware-monitor-0.1.0-1.x86_64.rpm
+
+# 4. 无界面 CLI 硬件监测与准确基准测试（适用于 Linux 服务器 / SSH 终端）
+winhardware-monitor --cli                                          # 普通用户查看 CPU/温度/内存/GPU/磁盘
+sudo winhardware-monitor --cli                                     # 提权读取 SATA / USB SAT / NVMe SMART 与 21 条健康规则
+winhardware-monitor --bench all --duration 15 --mem-mb 256 --disk-mb 128 --cutoff-c 90
 ```
 
 更多构建、依赖许可证与代码签名细节请查阅 [docs/BUILD.md](docs/BUILD.md)。

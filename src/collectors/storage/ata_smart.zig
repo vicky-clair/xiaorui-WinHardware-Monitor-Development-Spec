@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../../providers/windows/win32.zig");
 const sensor = @import("../../core/sensor.zig");
 
@@ -200,6 +201,9 @@ pub fn readAtaSmart(drive_index: u32, allow_wake_standby: bool) AtaSmartData {
 }
 
 pub fn readAtaSmartWithMode(drive_index: u32, allow_wake_standby: bool, prefer_sat: bool) AtaSmartData {
+    if (builtin.os.tag == .linux) {
+        return @import("../../providers/linux/storage.zig").readLinuxAtaSmart(drive_index, allow_wake_standby);
+    }
     var path_utf8: [64]u8 = undefined;
     const path_slice = std.fmt.bufPrint(&path_utf8, "\\\\.\\PhysicalDrive{d}", .{drive_index}) catch {
         return .{ .status = .transient_error };
@@ -437,6 +441,7 @@ fn ataSmartReadPage(handle: win32.HANDLE, feature: u8, out_512: *[512]u8) win32.
 /// V2.0 可选主动 SMART 短自检（ATA SMART EXECUTE OFF-LINE IMMEDIATE, Feature 0xD4, LBA Low 0x01）。
 /// 严格遵守 AGENTS.md V2.0 安全边界：仅在用户于界面明确点击二次确认后调用，绝不自动执行！
 pub fn triggerAtaShortSelfTest(drive_index: u32) enum { started, access_denied, unsupported, failed } {
+    if (builtin.os.tag != .windows) return .unsupported;
     var path_utf8: [64]u8 = undefined;
     const path_slice = std.fmt.bufPrint(&path_utf8, "\\\\.\\PhysicalDrive{d}", .{drive_index}) catch return .failed;
     var path_w: [65]u16 = undefined;

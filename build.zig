@@ -74,30 +74,32 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "运行 WinHardware Monitor 主程序");
     run_step.dependOn(&run_cmd.step);
 
-    // P0 命令行硬件与技术栈自检工具（保留控制台子系统便于终端查看输出）
-    const verify_mod = b.createModule(.{
-        .root_source_file = b.path("src/verify_p0.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    wireModules(verify_mod, zgui_dep, zglfw_dep, zopengl_dep, sqlite3_dep, sqlite_lib);
+    // P0 命令行硬件与技术栈自检工具（仅 Windows 目标构建）
+    if (target.result.os.tag == .windows) {
+        const verify_mod = b.createModule(.{
+            .root_source_file = b.path("src/verify_p0.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        wireModules(verify_mod, zgui_dep, zglfw_dep, zopengl_dep, sqlite3_dep, sqlite_lib);
 
-    const verify_exe = b.addExecutable(.{
-        .name = "verify-p0",
-        .root_module = verify_mod,
-    });
-    b.installArtifact(verify_exe);
+        const verify_exe = b.addExecutable(.{
+            .name = "verify-p0",
+            .root_module = verify_mod,
+        });
+        b.installArtifact(verify_exe);
 
-    const verify_run = b.addRunArtifact(verify_exe);
-    verify_run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        verify_run.addArgs(args);
+        const verify_run = b.addRunArtifact(verify_exe);
+        verify_run.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            verify_run.addArgs(args);
+        }
+        const verify_step = b.step("verify-p0", "运行 P0 硬件接口与权限自检工具");
+        verify_step.dependOn(&verify_run.step);
     }
-    const verify_step = b.step("verify-p0", "运行 P0 硬件接口与权限自检工具");
-    verify_step.dependOn(&verify_run.step);
 
-    // 全模块自动化单元测试（zig build test）
+    // 全模块自动化单元测试（zig build test，Windows / Linux 跨平台运行）
     const test_mod = b.createModule(.{
         .root_source_file = b.path("src/root_tests.zig"),
         .target = target,
@@ -106,7 +108,7 @@ pub fn build(b: *std.Build) void {
     });
     test_mod.addIncludePath(sqlite3_dep.path(""));
     test_mod.linkLibrary(sqlite_lib);
-    linkWindowsSystemLibs(test_mod);
+    linkPlatformLibs(test_mod, false);
 
     const unit_tests = b.addTest(.{
         .root_module = test_mod,
@@ -134,10 +136,10 @@ fn wireModules(
     mod.linkLibrary(zopengl_dep.artifact("zopengl"));
     mod.linkLibrary(sqlite_lib);
 
-    linkWindowsSystemLibs(mod);
+    linkPlatformLibs(mod, true);
 }
 
-fn linkWindowsSystemLibs(mod: *std.Build.Module) void {
+fn linkPlatformLibs(mod: *std.Build.Module, with_gui: bool) void {
     if (mod.resolved_target) |t| {
         if (t.result.os.tag == .windows) {
             mod.linkSystemLibrary("user32", .{});
@@ -153,6 +155,18 @@ fn linkWindowsSystemLibs(mod: *std.Build.Module) void {
             mod.linkSystemLibrary("powrprof", .{});
             mod.linkSystemLibrary("dwmapi", .{});
             mod.linkSystemLibrary("ntdll", .{});
+        } else if (t.result.os.tag == .linux) {
+            mod.linkSystemLibrary("m", .{});
+            mod.linkSystemLibrary("pthread", .{});
+            mod.linkSystemLibrary("dl", .{});
+            if (with_gui) {
+                mod.linkSystemLibrary("GL", .{});
+                mod.linkSystemLibrary("X11", .{});
+                mod.linkSystemLibrary("Xrandr", .{});
+                mod.linkSystemLibrary("Xinerama", .{});
+                mod.linkSystemLibrary("Xcursor", .{});
+                mod.linkSystemLibrary("Xi", .{});
+            }
         }
     }
 }

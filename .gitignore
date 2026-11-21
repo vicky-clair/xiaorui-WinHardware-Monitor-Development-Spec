@@ -8,6 +8,7 @@ helpers/lhm_bridge/obj/
 
 # 发布与打包生成的应用包（仓库仅保留源码与脚本）
 dist/
+dist-linux/
 packaging/windows/output/
 *.exe
 *.dll
@@ -16,6 +17,10 @@ packaging/windows/output/
 *.a
 *.msi
 *.zip
+*.deb
+*.rpm
+*.tar.gz
+*.AppImage
 *.nupkg
 
 # 本地运行数据、日志与数据库（严禁提交用户本机硬件信息）

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zglfw = @import("zglfw");
 const zopengl = @import("zopengl");
 const zgui = @import("zgui");
@@ -50,6 +51,7 @@ fn onWindowIconify(_: *zglfw.Window, iconified: zglfw.Bool) callconv(.c) void {
 }
 
 fn applyTitlebarTheme(native_hwnd: ?win32.HWND, mode: state_mod.ThemeMode) void {
+    if (builtin.os.tag != .windows) return;
     if (native_hwnd) |hwnd| {
         const dark: win32.BOOL = if (mode == .dark) 1 else 0;
         _ = win32.DwmSetWindowAttribute(hwnd, win32.DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, @sizeOf(win32.BOOL));
@@ -57,8 +59,8 @@ fn applyTitlebarTheme(native_hwnd: ?win32.HWND, mode: state_mod.ThemeMode) void 
 }
 
 pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
-    const co_hr = win32.CoInitializeEx(null, win32.COINIT_APARTMENTTHREADED);
-    defer if (co_hr >= 0) win32.CoUninitialize();
+    const co_hr: i32 = if (builtin.os.tag == .windows) win32.CoInitializeEx(null, win32.COINIT_APARTMENTTHREADED) else -1;
+    defer if (builtin.os.tag == .windows and co_hr >= 0) win32.CoUninitialize();
 
     var paths = try AppPaths.resolve(allocator);
     defer paths.deinit();
@@ -107,18 +109,20 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     zglfw.windowHint(.visible, false);
 
     const window = zglfw.Window.create(1280, 780, "WinHardware Monitor", null, null) catch {
-        const msg = std.unicode.utf8ToUtf16LeStringLiteral(
-            "无法创建 OpenGL 3.3 Core 渲染上下文。\n请检查显卡驱动，或避免在不支持 OpenGL 3.3 的远程桌面/虚拟机环境中运行。",
-        );
-        const cap = std.unicode.utf8ToUtf16LeStringLiteral("WinHardware Monitor - 启动失败");
-        _ = win32.MessageBoxW(null, msg, cap, 0x10);
+        if (builtin.os.tag == .windows) {
+            const msg = std.unicode.utf8ToUtf16LeStringLiteral(
+                "无法创建 OpenGL 3.3 Core 渲染上下文。\n请检查显卡驱动，或避免在不支持 OpenGL 3.3 的远程桌面/虚拟机环境中运行。",
+            );
+            const cap = std.unicode.utf8ToUtf16LeStringLiteral("WinHardware Monitor - 启动失败");
+            _ = win32.MessageBoxW(null, msg, cap, 0x10);
+        }
         return error.OpenGLContextFailed;
     };
     defer window.destroy();
 
     window.setSizeLimits(920, 580, -1, -1);
 
-    const native_hwnd: ?win32.HWND = @ptrCast(zglfw.getWin32Window(window));
+    const native_hwnd: ?win32.HWND = if (builtin.os.tag == .windows) @ptrCast(zglfw.getWin32Window(window)) else null;
     applyTitlebarTheme(native_hwnd, config.theme_mode);
 
     _ = window.setCursorPosCallback(onCursorPos);

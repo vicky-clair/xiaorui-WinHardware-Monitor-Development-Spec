@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("win32.zig");
 const smbios = @import("smbios.zig");
 const pdh = @import("pdh.zig");
@@ -62,7 +63,13 @@ pub const SystemSnapshot = struct {
     }
 };
 
-pub const SystemInfoProvider = struct {
+/// 跨平台系统信息采集器类型分发（Windows 走 Win32/PDH/SMBIOS，Linux 走 /proc & /sys）
+pub const SystemInfoProvider = if (builtin.os.tag == .windows)
+    WinSystemInfoProvider
+else
+    @import("../linux/system_info.zig").LinuxSystemInfoProvider;
+
+pub const WinSystemInfoProvider = struct {
     pdh_cpu: pdh.PdhCpuCollector,
     prev_idle: u64 = 0,
     prev_kernel: u64 = 0,
@@ -80,8 +87,8 @@ pub const SystemInfoProvider = struct {
     base_clock_mhz: u32 = 0,
     smbios_info: smbios.SmbiosData = .{},
 
-    pub fn init(allocator: std.mem.Allocator) SystemInfoProvider {
-        var self = SystemInfoProvider{
+    pub fn init(allocator: std.mem.Allocator) WinSystemInfoProvider {
+        var self = WinSystemInfoProvider{
             .pdh_cpu = pdh.PdhCpuCollector.init(),
         };
 
@@ -114,11 +121,11 @@ pub const SystemInfoProvider = struct {
         return self;
     }
 
-    pub fn deinit(self: *SystemInfoProvider) void {
+    pub fn deinit(self: *WinSystemInfoProvider) void {
         self.pdh_cpu.deinit();
     }
 
-    pub fn collect(self: *SystemInfoProvider) SystemSnapshot {
+    pub fn collect(self: *WinSystemInfoProvider) SystemSnapshot {
         var snap = SystemSnapshot{
             .collected_utc_ms = std.time.milliTimestamp(),
             .uptime_seconds = win32.GetTickCount64() / 1000,
@@ -184,7 +191,7 @@ pub const SystemInfoProvider = struct {
         return snap;
     }
 
-    fn samplePerCoreUsage(self: *SystemInfoProvider, out_pct: *[MAX_LOGICAL_CORES]f32) usize {
+    fn samplePerCoreUsage(self: *WinSystemInfoProvider, out_pct: *[MAX_LOGICAL_CORES]f32) usize {
         var cur: [MAX_LOGICAL_CORES]win32.SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION =
             [_]win32.SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION{.{}} ** MAX_LOGICAL_CORES;
         var ret_len: win32.ULONG = 0;
@@ -224,7 +231,7 @@ pub const SystemInfoProvider = struct {
         return count;
     }
 
-    fn sampleGetSystemTimes(self: *SystemInfoProvider) ?f64 {
+    fn sampleGetSystemTimes(self: *WinSystemInfoProvider) ?f64 {
         var idle: win32.FILETIME = undefined;
         var kernel: win32.FILETIME = undefined;
         var user: win32.FILETIME = undefined;

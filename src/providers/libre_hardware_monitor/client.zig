@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../windows/win32.zig");
 const sensor = @import("../../core/sensor.zig");
 const protocol = @import("protocol.zig");
@@ -48,6 +49,10 @@ pub const LhmClient = struct {
     enabled: bool = false,
 
     pub fn poll(self: *const LhmClient) ExtensionSnapshot {
+        if (builtin.os.tag == .linux) {
+            // Linux 原生内核 hwmon 无需第三方驱动或辅助进程，普通用户即可直接提供 CPU 与主板传感器
+            return @import("../linux/hwmon.zig").collectHwmonSnapshot();
+        }
         if (!self.enabled) {
             return .{ .status = .requires_extension, .connected = false };
         }
@@ -62,6 +67,7 @@ pub const LhmClient = struct {
 
     /// 请求独立辅助进程优雅退出
     pub fn requestShutdown(self: *const LhmClient) bool {
+        if (builtin.os.tag != .windows) return false;
         const resp = self.sendPipeRequest("{\"version\":1,\"op\":\"shutdown\"}") orelse return false;
         self.allocator.free(resp);
         return true;
@@ -206,8 +212,13 @@ fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 test "LhmClient safely degrades when disabled or helper absent, and parses snapshot JSON" {
     var client = LhmClient{ .allocator = std.testing.allocator, .enabled = false };
     const s1 = client.poll();
-    try std.testing.expectEqual(sensor.SensorStatus.requires_extension, s1.status);
-    try std.testing.expect(!s1.connected);
+    if (builtin.os.tag == .windows) {
+        try std.testing.expectEqual(sensor.SensorStatus.requires_extension, s1.status);
+        try std.testing.expect(!s1.connected);
+    } else {
+        // Linux 原生 hwmon 直接采集，无需外部辅助进程
+        try std.testing.expect(s1.status == .ok or s1.status == .unsupported);
+    }
 
     const sample_json =
         \\{"version":1,"is_admin":true,"sensors":[

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("win32.zig");
 
 /// 用户态 SMBIOS (RSMB) 解析器（规范 §2.4 / §3.3）：
@@ -89,6 +90,7 @@ pub const SmbiosData = struct {
 };
 
 pub fn queryLocal(allocator: std.mem.Allocator) SmbiosData {
+    if (builtin.os.tag != .windows) return .{};
     const needed = win32.GetSystemFirmwareTable(win32.RSMB_SIGNATURE, 0, null, 0);
     if (needed < 8 or needed > 4 * 1024 * 1024) return .{};
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../providers/windows/win32.zig");
 
 /// 规范 §5.1 文件存放位置解析（支持安装版 %LOCALAPPDATA% 与便携版 portable.flag，全程支持中文/空格路径）
@@ -84,27 +85,45 @@ pub const AppPaths = struct {
 };
 
 fn getExeDirUtf8(allocator: std.mem.Allocator) ![]u8 {
-    var wbuf: [1024]u16 = undefined;
-    const len = win32.GetModuleFileNameW(null, @ptrCast(&wbuf), wbuf.len - 1);
-    if (len == 0 or len >= wbuf.len) return error.ModulePathFailed;
-    const full_utf8 = try std.unicode.utf16LeToUtf8Alloc(allocator, wbuf[0..len]);
-    defer allocator.free(full_utf8);
-    const dir = std.fs.path.dirname(full_utf8) orelse ".";
+    if (builtin.os.tag == .windows) {
+        var wbuf: [1024]u16 = undefined;
+        const len = win32.GetModuleFileNameW(null, @ptrCast(&wbuf), wbuf.len - 1);
+        if (len == 0 or len >= wbuf.len) return error.ModulePathFailed;
+        const full_utf8 = try std.unicode.utf16LeToUtf8Alloc(allocator, wbuf[0..len]);
+        defer allocator.free(full_utf8);
+        const dir = std.fs.path.dirname(full_utf8) orelse ".";
+        return allocator.dupe(u8, dir);
+    }
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_path = std.fs.selfExePath(&buf) catch return allocator.dupe(u8, ".");
+    const dir = std.fs.path.dirname(exe_path) orelse ".";
     return allocator.dupe(u8, dir);
 }
 
 fn getLocalAppDataUtf8(allocator: std.mem.Allocator) ![]u8 {
-    const key = std.unicode.utf8ToUtf16LeStringLiteral("LOCALAPPDATA");
-    var wbuf: [1024]u16 = undefined;
-    const len = win32.GetEnvironmentVariableW(key, @ptrCast(&wbuf), wbuf.len - 1);
-    if (len == 0 or len >= wbuf.len) return error.EnvNotFound;
-    return std.unicode.utf16LeToUtf8Alloc(allocator, wbuf[0..len]);
+    if (builtin.os.tag == .windows) {
+        const key = std.unicode.utf8ToUtf16LeStringLiteral("LOCALAPPDATA");
+        var wbuf: [1024]u16 = undefined;
+        const len = win32.GetEnvironmentVariableW(key, @ptrCast(&wbuf), wbuf.len - 1);
+        if (len == 0 or len >= wbuf.len) return error.EnvNotFound;
+        return std.unicode.utf16LeToUtf8Alloc(allocator, wbuf[0..len]);
+    }
+    if (std.posix.getenv("XDG_DATA_HOME")) |xdg| {
+        if (xdg.len > 0) return allocator.dupe(u8, xdg);
+    }
+    if (std.posix.getenv("HOME")) |home| {
+        if (home.len > 0) return std.fs.path.join(allocator, &.{ home, ".local", "share" });
+    }
+    return error.EnvNotFound;
 }
 
 test "AppPaths builds portable and installed layouts with Chinese paths" {
-    var p = try AppPaths.buildFromBase(std.testing.allocator, "C:\\测试目录\\WinHardware Monitor", true);
+    const sample_base = if (builtin.os.tag == .windows) "C:\\测试目录\\WinHardware Monitor" else "/tmp/测试目录/WinHardware Monitor";
+    var p = try AppPaths.buildFromBase(std.testing.allocator, sample_base, true);
     defer p.deinit();
     try std.testing.expect(p.is_portable);
-    try std.testing.expect(std.mem.endsWith(u8, p.settings_file, "config\\settings.toml"));
-    try std.testing.expect(std.mem.endsWith(u8, p.db_file, "data\\monitor.db"));
+    const exp_cfg = if (builtin.os.tag == .windows) "config\\settings.toml" else "config/settings.toml";
+    const exp_db = if (builtin.os.tag == .windows) "data\\monitor.db" else "data/monitor.db";
+    try std.testing.expect(std.mem.endsWith(u8, p.settings_file, exp_cfg));
+    try std.testing.expect(std.mem.endsWith(u8, p.db_file, exp_db));
 }

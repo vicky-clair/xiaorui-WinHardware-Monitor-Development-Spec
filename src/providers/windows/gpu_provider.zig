@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("win32.zig");
 const sensor = @import("../../core/sensor.zig");
 
@@ -123,20 +124,26 @@ fn loadSym(comptime T: type, hm: win32.HMODULE, name: [*:0]const u8) ?T {
     return @ptrCast(@alignCast(p));
 }
 
-pub const GpuProvider = struct {
+/// 跨平台 GPU Provider（Windows 走动态 NVML + D3DKMT，Linux 走 DRM/hwmon sysfs）
+pub const GpuProvider = if (builtin.os.tag == .windows)
+    WinGpuProvider
+else
+    @import("../linux/gpu_provider.zig").LinuxGpuProvider;
+
+pub const WinGpuProvider = struct {
     nvml: NvmlApi,
 
-    pub fn init() GpuProvider {
+    pub fn init() WinGpuProvider {
         return .{
             .nvml = NvmlApi.load(),
         };
     }
 
-    pub fn deinit(self: *GpuProvider) void {
+    pub fn deinit(self: *WinGpuProvider) void {
         self.nvml.unload();
     }
 
-    pub fn collect(self: *GpuProvider) GpuSnapshot {
+    pub fn collect(self: *WinGpuProvider) GpuSnapshot {
         var snap = GpuSnapshot{
             .collected_utc_ms = std.time.milliTimestamp(),
         };
@@ -213,7 +220,7 @@ pub const GpuProvider = struct {
         return snap;
     }
 
-    fn mergeD3dkmt(self: *GpuProvider, snap: *GpuSnapshot) void {
+    fn mergeD3dkmt(self: *WinGpuProvider, snap: *GpuSnapshot) void {
         _ = self;
         var enum_req = win32.D3DKMT_ENUMADAPTERS2{
             .NumAdapters = 0,
@@ -281,14 +288,21 @@ pub const GpuProvider = struct {
     }
 };
 
-test "GpuProvider collects real local GPU temperature without admin privilege" {
+test "GpuProvider collects real local GPU info without admin privilege" {
     var prov = GpuProvider.init();
     defer prov.deinit();
 
     const snap = prov.collect();
-    try std.testing.expect(snap.count >= 1);
-    const g0 = snap.gpus[0];
-    try std.testing.expectEqual(sensor.SensorStatus.ok, g0.temp_status);
-    try std.testing.expect(g0.temp_c != null);
-    try std.testing.expect(g0.temp_c.? > 5.0 and g0.temp_c.? < 130.0);
+    if (builtin.os.tag == .windows) {
+        try std.testing.expect(snap.count >= 1);
+        const g0 = snap.gpus[0];
+        try std.testing.expectEqual(sensor.SensorStatus.ok, g0.temp_status);
+        try std.testing.expect(g0.temp_c != null);
+        try std.testing.expect(g0.temp_c.? > 5.0 and g0.temp_c.? < 130.0);
+    } else {
+        // Linux 物理机或无头容器均安全运行不崩溃
+        for (snap.slice()) |g| {
+            try std.testing.expect(g.name_len > 0);
+        }
+    }
 }

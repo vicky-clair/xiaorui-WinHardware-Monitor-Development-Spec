@@ -1,4 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+const linux_fadvise = if (builtin.os.tag == .linux) struct {
+    extern "c" fn posix_fadvise(fd: c_int, offset: i64, len: i64, advice: c_int) c_int;
+    const POSIX_FADV_DONTNEED: c_int = 4;
+} else struct {};
 
 /// V2.0 跨平台硬件压力测试与性能基准引擎（Windows / Linux 共用核心算法）。
 /// 安全约束（AGENTS.md V2.0 红线 #6）：
@@ -612,6 +618,10 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
             self.mutex.unlock();
         }
         f.sync() catch {};
+        // Linux 下通过 posix_fadvise(POSIX_FADV_DONTNEED) 驱逐该临时文件的内核页缓存，避免后续读取测成内存速度
+        if (builtin.os.tag == .linux) {
+            _ = linux_fadvise.posix_fadvise(f.handle, 0, 0, linux_fadvise.POSIX_FADV_DONTNEED);
+        }
         const tw1 = std.time.nanoTimestamp();
         const ws = @max(0.001, @as(f64, @floatFromInt(tw1 - tw0)) / @as(f64, @floatFromInt(std.time.ns_per_s)));
         self.mutex.lock();

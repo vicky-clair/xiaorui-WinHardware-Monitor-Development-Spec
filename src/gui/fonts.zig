@@ -1,9 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zgui = @import("zgui");
 
-/// 中文字体加载器（规范 §7 / Q5）：
-/// 优先按顺序加载 Windows 系统自带中文字体，依靠 ImGui 1.92 动态字形按需光栅化，
-/// 不向 EXE 打包数十 MB 字体文件；全部不可用时回退 ImGui 内置默认字体。
+/// 跨平台中文字体加载器（规范 §7 / Q5）：
+/// Windows 优先加载 msyh.ttc → simhei.ttf → simsun.ttc；
+/// Linux 优先加载 Noto Sans CJK → WenQuanYi Micro Hei → DejaVu Sans；
+/// 全部不可用时回退 ImGui 默认内置字体。
 pub const FontResult = struct {
     loaded_name: []const u8,
     base_size_px: f32,
@@ -14,10 +16,18 @@ const Candidate = struct {
     label: []const u8,
 };
 
-const CANDIDATES = [_]Candidate{
+const WIN_CANDIDATES = [_]Candidate{
     .{ .path = "C:\\Windows\\Fonts\\msyh.ttc", .label = "Microsoft YaHei (msyh.ttc)" },
     .{ .path = "C:\\Windows\\Fonts\\simhei.ttf", .label = "SimHei (simhei.ttf)" },
     .{ .path = "C:\\Windows\\Fonts\\simsun.ttc", .label = "SimSun (simsun.ttc)" },
+};
+
+const LINUX_CANDIDATES = [_]Candidate{
+    .{ .path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", .label = "Noto Sans CJK" },
+    .{ .path = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", .label = "Noto Sans CJK" },
+    .{ .path = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", .label = "WenQuanYi Micro Hei" },
+    .{ .path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", .label = "WenQuanYi Zen Hei" },
+    .{ .path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", .label = "DejaVu Sans" },
 };
 
 pub fn loadFonts(dpi_scale: f32) FontResult {
@@ -26,8 +36,9 @@ pub fn loadFonts(dpi_scale: f32) FontResult {
 
     const scale = @max(dpi_scale, 1.0);
     const base_px: f32 = 16.0 * scale;
+    const candidates = if (builtin.os.tag == .windows) &WIN_CANDIDATES else &LINUX_CANDIDATES;
 
-    for (CANDIDATES) |cand| {
+    for (candidates) |cand| {
         if (std.fs.accessAbsolute(cand.path, .{})) |_| {
             const font = zgui.io.addFontFromFile(cand.path, base_px);
             zgui.io.setDefaultFont(font);

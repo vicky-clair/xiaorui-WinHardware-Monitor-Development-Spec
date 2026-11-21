@@ -1,9 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../providers/windows/win32.zig");
 
 /// 显式管理员提权重启（规范 §1.2 / §9：禁止静默提权，仅由用户点击触发 UAC）。
 /// 传入 --wait-mutex 参数，让新提权实例平滑等待旧进程释放单实例互斥体。
 pub fn relaunchAsAdministrator(parent_hwnd: ?win32.HWND) bool {
+    if (builtin.os.tag != .windows) return false;
     var exe_path: [1024]u16 = std.mem.zeroes([1024]u16);
     const len = win32.GetModuleFileNameW(null, @ptrCast(&exe_path), exe_path.len - 1);
     if (len == 0 or len >= exe_path.len) return false;
@@ -25,6 +27,7 @@ pub fn relaunchAsAdministrator(parent_hwnd: ?win32.HWND) bool {
 /// 显式按需启动独立隔离的 LibreHardwareMonitor 辅助进程（MPL-2.0，需用户点击触发 UAC）。
 /// 优先在主程序同目录查找 `WinHardwareMonitor.LhmHelper.exe`。
 pub fn launchLhmHelperAsAdministrator(allocator: std.mem.Allocator, parent_hwnd: ?win32.HWND) enum { launched, not_found, cancelled } {
+    if (builtin.os.tag != .windows) return .not_found;
     var exe_w: [1024]u16 = std.mem.zeroes([1024]u16);
     const len = win32.GetModuleFileNameW(null, @ptrCast(&exe_w), exe_w.len - 1);
     if (len == 0 or len >= exe_w.len) return .not_found;

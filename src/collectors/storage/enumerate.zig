@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../../providers/windows/win32.zig");
 const device_id = @import("../../core/device_id.zig");
 const sensor = @import("../../core/sensor.zig");
@@ -128,6 +129,9 @@ pub fn classifyBus(bus: win32.STORAGE_BUS_TYPE, model: []const u8) DiskSupport {
 }
 
 pub fn enumeratePhysicalDisks() DiskInventory {
+    if (builtin.os.tag == .linux) {
+        return @import("../../providers/linux/storage.zig").enumerateLinuxDisks();
+    }
     var inv = DiskInventory{
         .enumerated_utc_ms = std.time.milliTimestamp(),
     };

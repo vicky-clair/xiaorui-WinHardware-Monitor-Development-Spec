@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const win32 = @import("../providers/windows/win32.zig");
 const TrayIcon = @import("tray.zig").TrayIcon;
 
@@ -30,6 +31,7 @@ pub const MessageWindow = struct {
     const TASKBAR_MSG_NAME = std.unicode.utf8ToUtf16LeStringLiteral("TaskbarCreated");
 
     pub fn init(self: *MessageWindow) !void {
+        if (builtin.os.tag != .windows) return;
         self.hinst = @ptrCast(win32.GetModuleHandleW(null));
         self.taskbar_created_msg = win32.RegisterWindowMessageW(TASKBAR_MSG_NAME);
 
@@ -69,6 +71,7 @@ pub const MessageWindow = struct {
     }
 
     pub fn deinit(self: *MessageWindow) void {
+        if (builtin.os.tag != .windows) return;
         self.tray.detach();
         if (self.hwnd) |hwnd| {
             _ = win32.SetWindowLongPtrW(hwnd, win32.GWLP_USERDATA, 0);
@@ -82,6 +85,7 @@ pub const MessageWindow = struct {
     }
 
     pub fn pumpMessages(self: *MessageWindow) void {
+        if (builtin.os.tag != .windows) return;
         const hwnd = self.hwnd orelse return;
         var msg: win32.MSG = .{};
         while (win32.PeekMessageW(&msg, hwnd, 0, 0, win32.PM_REMOVE) != 0) {
