@@ -1,0 +1,36 @@
+# Zig 构建产物与缓存
+.zig-cache/
+zig-out/
+
+# .NET 可选 LHM 辅助进程构建缓存
+helpers/lhm_bridge/bin/
+helpers/lhm_bridge/obj/
+
+# 发布与打包生成的应用包（仓库仅保留源码与脚本）
+dist/
+packaging/windows/output/
+*.exe
+*.dll
+*.pdb
+*.lib
+*.a
+*.msi
+*.zip
+*.nupkg
+
+# 本地运行数据、日志与数据库（严禁提交用户本机硬件信息）
+config/settings.toml
+config/settings_backup.toml
+data/*.db
+data/*.db-wal
+data/*.db-shm
+logs/
+*.log
+
+# IDE 与系统临时文件
+.vscode/
+.idea/
+*.swp
+imgui.ini
+Thumbs.db
+Desktop.ini

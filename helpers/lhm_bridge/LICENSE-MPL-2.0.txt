@@ -1,0 +1,16 @@
+Mozilla Public License Version 2.0
+==================================
+
+This directory (`helpers/lhm_bridge`) contains the optional, process-isolated
+LibreHardwareMonitor helper (`WinHardwareMonitor.LhmHelper.exe`) for
+WinHardware Monitor.
+
+Per project licensing boundary (Spec §19 Q3 / Q8):
+- The main WinHardware Monitor executable (`winhardware-monitor.exe`) is
+  licensed under the Apache License, Version 2.0 (see root `LICENSE`).
+- This helper runs strictly as a separate process communicating over a local
+  read-only Named Pipe (`\\.\pipe\WinHardwareMonitor_LhmBridge_v1`) and is
+  licensed under the Mozilla Public License, Version 2.0 (MPL-2.0) to comply
+  with `LibreHardwareMonitorLib`.
+- Full MPL-2.0 text: https://www.mozilla.org/en-US/MPL/2.0/
+- Source code for this helper is distributed in `helpers/lhm_bridge/`.

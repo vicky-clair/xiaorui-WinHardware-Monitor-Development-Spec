@@ -1,0 +1,185 @@
+# 项目自维护通用 ATA SMART 属性定义表
+# 说明：仅包含行业公开通用的属性说明，不含任何第三方 GPL 数据库内容。
+# 厂商对 Raw 值的编码可能不同，程序始终保留 6 字节原始值。
+
+[attr_01]
+id = 1
+name = "Read Error Rate"
+name_zh = "读取错误率"
+category = "error"
+raw_interpretation = "vendor_specific"
+
+[attr_03]
+id = 3
+name = "Spin-Up Time"
+name_zh = "主轴起转时间"
+category = "hdd"
+raw_interpretation = "u16_ms"
+
+[attr_05]
+id = 5
+name = "Reallocated Sectors Count"
+name_zh = "重映射扇区计数"
+category = "critical"
+raw_interpretation = "counter_u48"
+
+[attr_07]
+id = 7
+name = "Seek Error Rate"
+name_zh = "寻道错误率"
+category = "hdd"
+raw_interpretation = "vendor_specific"
+
+[attr_09]
+id = 9
+name = "Power-On Hours"
+name_zh = "累计通电时间"
+category = "usage"
+raw_interpretation = "hours_u32"
+
+[attr_0A]
+id = 10
+name = "Spin Retry Count"
+name_zh = "起转重试计数"
+category = "hdd"
+raw_interpretation = "counter_u48"
+
+[attr_0C]
+id = 12
+name = "Power Cycle Count"
+name_zh = "通电次数"
+category = "usage"
+raw_interpretation = "counter_u48"
+
+[attr_AB]
+id = 171
+name = "Program Fail Count"
+name_zh = "编程失败计数"
+category = "ssd"
+raw_interpretation = "counter_u48"
+
+[attr_AC]
+id = 172
+name = "Erase Fail Count"
+name_zh = "擦除失败计数"
+category = "ssd"
+raw_interpretation = "counter_u48"
+
+[attr_AD]
+id = 173
+name = "Wear Leveling Count"
+name_zh = "磨损均衡计数"
+category = "ssd"
+raw_interpretation = "vendor_specific"
+
+[attr_B1]
+id = 177
+name = "Wear Range Delta"
+name_zh = "磨损差值 / 均衡计数"
+category = "ssd"
+raw_interpretation = "vendor_specific"
+
+[attr_B4]
+id = 180
+name = "Unused Reserved Block Count"
+name_zh = "未使用保留块计数"
+category = "ssd"
+raw_interpretation = "counter_u48"
+
+[attr_B8]
+id = 184
+name = "End-to-End Error"
+name_zh = "端到端数据路径错误"
+category = "critical"
+raw_interpretation = "counter_u48"
+
+[attr_BB]
+id = 187
+name = "Reported Uncorrectable Errors"
+name_zh = "报告不可校正错误"
+category = "critical"
+raw_interpretation = "counter_u48"
+
+[attr_BC]
+id = 188
+name = "Command Timeout"
+name_zh = "命令超时"
+category = "error"
+raw_interpretation = "counter_u48"
+
+[attr_BE]
+id = 190
+name = "Airflow Temperature"
+name_zh = "气流温度"
+category = "temperature"
+raw_interpretation = "temp_celsius_low8"
+
+[attr_C1]
+id = 193
+name = "Load Cycle Count"
+name_zh = "磁头加载/卸载次数"
+category = "hdd"
+raw_interpretation = "counter_u48"
+
+[attr_C2]
+id = 194
+name = "Temperature"
+name_zh = "磁盘温度"
+category = "temperature"
+raw_interpretation = "temp_celsius_low8"
+
+[attr_C4]
+id = 196
+name = "Reallocation Event Count"
+name_zh = "重映射事件计数"
+category = "critical"
+raw_interpretation = "counter_u48"
+
+[attr_C5]
+id = 197
+name = "Current Pending Sector"
+name_zh = "当前待处理扇区"
+category = "critical"
+raw_interpretation = "counter_u48"
+
+[attr_C6]
+id = 198
+name = "Offline Uncorrectable"
+name_zh = "离线不可校正扇区"
+category = "critical"
+raw_interpretation = "counter_u48"
+
+[attr_C7]
+id = 199
+name = "UDMA CRC Error Count"
+name_zh = "接口 CRC 传输错误"
+category = "interface"
+raw_interpretation = "counter_u48"
+
+[attr_E7]
+id = 231
+name = "SSD Life Left"
+name_zh = "SSD 剩余寿命"
+category = "ssd_life"
+raw_interpretation = "percent_normalized"
+
+[attr_E9]
+id = 233
+name = "Media Wearout Indicator"
+name_zh = "介质磨损指标"
+category = "ssd_life"
+raw_interpretation = "percent_normalized"
+
+[attr_F1]
+id = 241
+name = "Total LBAs Written"
+name_zh = "累计写入 LBA"
+category = "ssd"
+raw_interpretation = "counter_u48"
+
+[attr_F2]
+id = 242
+name = "Total LBAs Read"
+name_zh = "累计读取 LBA"
+category = "ssd"
+raw_interpretation = "counter_u48"

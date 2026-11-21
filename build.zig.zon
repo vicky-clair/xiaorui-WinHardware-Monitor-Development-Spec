@@ -1,0 +1,35 @@
+.{
+    .name = .winhardware_monitor,
+    .version = "0.1.0-p0",
+    .fingerprint = 0x6492c0886f408a96,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .zgui = .{
+            .url = "https://github.com/zig-gamedev/zgui/archive/f3ac2a45304eec6c291b74bee0b0a2bca80d06c5.tar.gz",
+            .hash = "zgui-0.6.0-dev--L6sZCJKbgDtswYwMn6eBaiUjKQKd0Sy4Y0pS2Shogem",
+        },
+        .zglfw = .{
+            .url = "https://github.com/zig-gamedev/zglfw/archive/0dd29d8073487c9fe1e45e6b729b3aac271d5a71.tar.gz",
+            .hash = "zglfw-0.10.0-dev-zgVDNIG4IQBWN_sfMD-xfC9bJS2hbBN2W7jNlDLovcdC",
+        },
+        .zopengl = .{
+            .url = "https://github.com/zig-gamedev/zopengl/archive/db9d615c742086b39954eef064f957e92dafc7e2.tar.gz",
+            .hash = "zopengl-0.6.0-dev-5-tnz36mDgBuU9pDfag6_B-qCWOJQc5GXiXuZ6z41zQM",
+        },
+        .sqlite3 = .{
+            .url = "https://sqlite.org/2026/sqlite-amalgamation-3530200.zip",
+            .hash = "N-V-__8AALc_rgC04POe18O0LKFRm4ouQpLtL3riscEmWp-Q",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "config",
+        "data",
+        "docs",
+        "README.md",
+        "CHANGELOG.md",
+        "AGENTS.md",
+    },
+}

@@ -1,0 +1,35 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig 0.15.2
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Setup .NET 8 SDK (Optional LHM Helper)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Run Zig unit tests
+        run: zig build test
+
+      - name: Build Debug (x86_64-windows)
+        run: zig build -Dtarget=x86_64-windows
+
+      - name: Build ReleaseSafe (x86_64-windows)
+        run: zig build -Dtarget=x86_64-windows -Doptimize=ReleaseSafe
+
+      - name: Build Optional MPL-2.0 LHM Helper
+        run: dotnet build helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -r win-x64

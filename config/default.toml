@@ -1,0 +1,47 @@
+# WinHardware Monitor 默认配置
+
+[general]
+language = "zh-CN"
+theme = "dark"
+temperature_unit = "C"
+start_with_windows = false
+close_behavior = "minimize_to_tray"
+minimize_behavior = "minimize_to_taskbar"
+enable_extension_helper = false
+
+[polling]
+system_interval_ms = 2000
+gpu_interval_ms = 2000
+disk_temp_interval_ms = 10000
+smart_interval_ms = 60000
+battery_smart_multiplier = 5
+allow_wake_standby_disk = false
+allow_wake_dgpu = false
+ioctl_timeout_ms = 5000
+
+[storage]
+db_flush_interval_s = 60
+retain_1m_days = 7
+retain_15m_days = 30
+retain_smart_days = 90
+
+[alerts]
+enabled = true
+desktop_notifications = true
+notify_on_recovery = true
+duration_s = 30
+hysteresis_c = 5
+suppress_minutes = 30
+
+[alerts.thresholds]
+cpu_caution_c = 80
+cpu_warning_c = 90
+gpu_caution_c = 80
+gpu_warning_c = 90
+ssd_caution_c = 60
+ssd_warning_c = 70
+hdd_caution_c = 50
+hdd_warning_c = 55
+nvme_percentage_used_caution = 80
+nvme_percentage_used_warning = 100
+ssd_life_left_warning = 10
