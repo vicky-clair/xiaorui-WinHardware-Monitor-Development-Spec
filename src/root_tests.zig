@@ -5,6 +5,7 @@ const std = @import("std");
 
 test {
     // 核心层（跨平台纯逻辑）
+    _ = @import("core/i18n.zig");
     _ = @import("core/sensor.zig");
     _ = @import("core/sensor_stats.zig");
     _ = @import("core/benchmarks.zig");

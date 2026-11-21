@@ -111,6 +111,7 @@ pub const MonitoringService = struct {
     db_path: ?[]const u8 = null,
     mutex: std.Thread.Mutex = .{},
     shared: SharedTelemetry = .{},
+    latest_seq_atomic: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     alerts: alert_mod.AlertEngine = .{},
     pending_notification: ?alert_mod.AlertEvent = null,
     stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -152,6 +153,8 @@ pub const MonitoringService = struct {
         defer self.mutex.unlock();
         self.alerts.acknowledgeAll();
         self.syncAlertsLocked();
+        self.shared.sample_seq += 1;
+        self.latest_seq_atomic.store(self.shared.sample_seq, .release);
     }
 
     pub fn takePendingNotification(self: *MonitoringService) ?alert_mod.AlertEvent {
@@ -211,6 +214,8 @@ pub const MonitoringService = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.shared.sensor_stats.resetStats();
+        self.shared.sample_seq += 1;
+        self.latest_seq_atomic.store(self.shared.sample_seq, .release);
     }
 
     pub fn triggerDiskRescan(self: *MonitoringService) void {
@@ -235,6 +240,7 @@ pub const MonitoringService = struct {
             ds.device.health = ds.assessment.overall;
         }
         self.shared.sample_seq += 1;
+        self.latest_seq_atomic.store(self.shared.sample_seq, .release);
     }
 
     /// 非阻塞拷贝后台快照（GUI 主线程专用：即使后台正在采集硬件或写入 SQLite，也绝不阻塞渲染帧）
@@ -245,10 +251,23 @@ pub const MonitoringService = struct {
         return true;
     }
 
-    pub fn latestSeq(self: *MonitoringService) u64 {
-        self.mutex.lock();
+    /// 低占用零冗余快照拷贝：仅当后台发布了新样本序号时才尝试加锁拷贝，避免 60 FPS 空转 memcpy (~280KB/帧)
+    pub fn tryCopySnapshotIfChanged(self: *MonitoringService, out: *SharedTelemetry, last_seq: *u64) bool {
+        const cur = self.latest_seq_atomic.load(.acquire);
+        if (cur == last_seq.*) return false;
+        if (!self.mutex.tryLock()) return false;
         defer self.mutex.unlock();
-        return self.shared.sample_seq;
+        out.* = self.shared;
+        last_seq.* = self.shared.sample_seq;
+        return true;
+    }
+
+    pub fn latestSeqAtomic(self: *const MonitoringService) u64 {
+        return self.latest_seq_atomic.load(.acquire);
+    }
+
+    pub fn latestSeq(self: *MonitoringService) u64 {
+        return self.latest_seq_atomic.load(.acquire);
     }
 
     fn findBaselineLocked(self: *const MonitoringService, id: device_id.StableId) ?health_rules.DiskBaseline {
@@ -339,6 +358,7 @@ pub const MonitoringService = struct {
             }
         }
         self.shared.sample_seq += 1;
+        self.latest_seq_atomic.store(self.shared.sample_seq, .release);
         self.mutex.unlock();
     }
 
@@ -432,6 +452,7 @@ pub const MonitoringService = struct {
                             self.shared.disk_states[0].device.temperature_c = t0.temp_c;
                             self.shared.disk0_temp_history.push(elapsed_s, @floatFromInt(t0.temp_c.?));
                             self.shared.sample_seq += 1;
+                            self.latest_seq_atomic.store(self.shared.sample_seq, .release);
                         }
                         self.mutex.unlock();
                     }
@@ -459,55 +480,55 @@ pub const MonitoringService = struct {
                 self.shared.sample_seq += 1;
                 if (snap.cpu_usage_pct) |cpu| {
                     self.shared.cpu_usage_history.push(elapsed_s, cpu);
-                    self.shared.sensor_stats.record("CPU", "CPU 总体使用率", "%", cpu);
+                    self.shared.sensor_stats.record("CPU", "cpu.usage", "%", cpu);
                 }
                 if (snap.cpu_clock_mhz) |clk| {
-                    self.shared.sensor_stats.record("CPU", "CPU 计算频率", "MHz", clk);
+                    self.shared.sensor_stats.record("CPU", "cpu.clock", "MHz", clk);
                 }
                 if (ext_snap.connected) {
                     if (ext_snap.cpu_package_temp_c) |ct| {
                         self.shared.cpu_temp_history.push(elapsed_s, ct);
-                        self.shared.sensor_stats.record("CPU", "CPU 封装温度 (LHM)", "C", ct);
-                        _ = self.alerts.evaluateTemperature("cpu0", "CPU 封装", ct, self.cpu_caution_c, self.cpu_warning_c, now_utc_ms);
+                        self.shared.sensor_stats.record("CPU", "cpu.pkg_temp", "C", ct);
+                        _ = self.alerts.evaluateTemperature("cpu0", "CPU Package", ct, self.cpu_caution_c, self.cpu_warning_c, now_utc_ms);
                     }
                     if (ext_snap.cpu_package_power_w) |pw| {
-                        self.shared.sensor_stats.record("CPU", "CPU 封装功耗 (LHM)", "W", pw);
+                        self.shared.sensor_stats.record("CPU", "cpu.pkg_power", "W", pw);
                     }
                     for (ext_snap.sensors[0..ext_snap.sensor_count]) |es| {
-                        self.shared.sensor_stats.record("扩展传感器", es.nameSlice(), es.unitSlice(), es.value);
+                        self.shared.sensor_stats.record("cat:ext", es.nameSlice(), es.unitSlice(), es.value);
                     }
                 }
                 if (snap.mem_load_pct) |mem| {
                     self.shared.mem_usage_history.push(elapsed_s, mem);
-                    self.shared.sensor_stats.record("内存", "物理内存使用率", "%", mem);
+                    self.shared.sensor_stats.record("cat:memory", "mem.usage", "%", mem);
                 }
-                if (snap.disk_read_mbs) |dr| self.shared.sensor_stats.record("存储 I/O", "总读取吞吐", "MB/s", dr);
-                if (snap.disk_write_mbs) |dw| self.shared.sensor_stats.record("存储 I/O", "总写入吞吐", "MB/s", dw);
-                if (snap.disk_iops) |di| self.shared.sensor_stats.record("存储 I/O", "总磁盘 IOPS", "IOPS", di);
+                if (snap.disk_read_mbs) |dr| self.shared.sensor_stats.record("cat:storage_io", "io.read", "MB/s", dr);
+                if (snap.disk_write_mbs) |dw| self.shared.sensor_stats.record("cat:storage_io", "io.write", "MB/s", dw);
+                if (snap.disk_iops) |di| self.shared.sensor_stats.record("cat:storage_io", "io.iops", "IOPS", di);
                 if (snap.battery.has_battery) {
                     if (snap.battery.charge_pct) |bp| {
-                        self.shared.sensor_stats.record("电源", "电池剩余电量", "%", @floatFromInt(bp));
+                        self.shared.sensor_stats.record("cat:power", "power.battery", "%", @floatFromInt(bp));
                     }
                 }
                 for (self.shared.disk_states[0..self.shared.disk_count]) |ds| {
                     if (ds.effectiveTempC()) |tc| {
                         var dn_buf: [64]u8 = undefined;
-                        const dn = std.fmt.bufPrint(&dn_buf, "Disk {d} 温度", .{ds.device.drive_index}) catch "Disk 温度";
-                        self.shared.sensor_stats.record("磁盘", dn, "C", @floatFromInt(tc));
+                        const dn = std.fmt.bufPrint(&dn_buf, "disk.temp.{d}", .{ds.device.drive_index}) catch "disk.temp.0";
+                        self.shared.sensor_stats.record("cat:disk", dn, "C", @floatFromInt(tc));
                     }
                 }
                 if (gpu_snap.count > 0) {
                     if (gpu_snap.gpus[0].temp_c) |gt| {
                         self.shared.gpu_temp_history.push(elapsed_s, gt);
-                        self.shared.sensor_stats.record("GPU", "GPU 核心温度", "C", gt);
+                        self.shared.sensor_stats.record("GPU", "gpu.temp", "C", gt);
                         _ = self.alerts.evaluateTemperature("gpu0", gpu_snap.gpus[0].nameSlice(), gt, self.gpu_caution_c, self.gpu_warning_c, now_utc_ms);
                     }
                     if (gpu_snap.gpus[0].power_watts) |gp| {
                         self.shared.gpu_power_history.push(elapsed_s, gp);
-                        self.shared.sensor_stats.record("GPU", "GPU 实时功耗", "W", gp);
+                        self.shared.sensor_stats.record("GPU", "gpu.power", "W", gp);
                     }
-                    if (gpu_snap.gpus[0].usage_pct) |gu| self.shared.sensor_stats.record("GPU", "GPU 核心占用", "%", gu);
-                    if (gpu_snap.gpus[0].fan_rpm) |fr| self.shared.sensor_stats.record("GPU", "GPU 风扇转速", "RPM", @floatFromInt(fr));
+                    if (gpu_snap.gpus[0].usage_pct) |gu| self.shared.sensor_stats.record("GPU", "gpu.usage", "%", gu);
+                    if (gpu_snap.gpus[0].fan_rpm) |fr| self.shared.sensor_stats.record("GPU", "gpu.fan", "RPM", @floatFromInt(fr));
                 }
                 if (self.alerts.takePendingNotification()) |ev| {
                     self.pending_notification = ev;
@@ -516,6 +537,7 @@ pub const MonitoringService = struct {
                     }
                 }
                 self.syncAlertsLocked();
+                self.latest_seq_atomic.store(self.shared.sample_seq, .release);
                 self.mutex.unlock();
 
                 // 3. P6: 每 60 秒批量事务写入 1 分钟聚合数据至 SQLite

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const win32 = @import("../../providers/windows/win32.zig");
 const sensor = @import("../../core/sensor.zig");
+const i18n = @import("../../core/i18n.zig");
 
 /// ATA SMART 采集、解析与电源状态保护（规范 §2.5.1 / §2.5.3 / §2.5.4）。
 /// 1. 读取 SMART 前必须先执行 CHECK POWER MODE (0xE5)，处于 Standby/Sleep 时默认跳过，绝不唤醒休眠硬盘。
@@ -36,33 +37,33 @@ pub const AtaAttribute = struct {
 
     pub fn knownNameZh(id: u8) []const u8 {
         return switch (id) {
-            0x01 => "读取错误率",
-            0x03 => "主轴起转时间",
-            0x05 => "重映射扇区计数",
-            0x07 => "寻道错误率",
-            0x09 => "累计通电时间",
-            0x0A => "起转重试计数",
-            0x0C => "通电次数",
-            0xAB => "编程失败计数",
-            0xAC => "擦除失败计数",
-            0xAD => "磨损均衡计数",
-            0xB1 => "磨损差值",
-            0xB4 => "未使用保留块计数",
-            0xB8 => "端到端数据路径错误",
-            0xBB => "报告不可校正错误",
-            0xBC => "命令超时",
-            0xBE => "气流温度",
-            0xC1 => "磁头加载/卸载次数",
-            0xC2 => "磁盘温度",
-            0xC4 => "重映射事件计数",
-            0xC5 => "当前待处理扇区",
-            0xC6 => "离线不可校正扇区",
-            0xC7 => "接口 CRC 传输错误",
-            0xE7 => "SSD 剩余寿命",
-            0xE9 => "介质磨损指标",
-            0xF1 => "累计写入 LBA",
-            0xF2 => "累计读取 LBA",
-            else => "未知属性",
+            0x01 => i18n.trSlice("读取错误率", "Read Error Rate", "リードエラーレート"),
+            0x03 => i18n.trSlice("主轴起转时间", "Spin-Up Time", "スピンアップ時間"),
+            0x05 => i18n.trSlice("重映射扇区计数", "Reallocated Sectors Count", "代替処理済のセクタ数"),
+            0x07 => i18n.trSlice("寻道错误率", "Seek Error Rate", "シークエラーレート"),
+            0x09 => i18n.trSlice("累计通电时间", "Power-On Hours", "使用時間"),
+            0x0A => i18n.trSlice("起转重试计数", "Spin Retry Count", "スピンアップ再試行回数"),
+            0x0C => i18n.trSlice("通电次数", "Power Cycle Count", "電源投入回数"),
+            0xAB => i18n.trSlice("编程失败计数", "Program Fail Count", "プログラム失敗回数"),
+            0xAC => i18n.trSlice("擦除失败计数", "Erase Fail Count", "消去失敗回数"),
+            0xAD => i18n.trSlice("磨损均衡计数", "Wear Leveling Count", "ウェアレベリング回数"),
+            0xB1 => i18n.trSlice("磨损差值", "Wear Range Delta", "摩耗範囲デルタ"),
+            0xB4 => i18n.trSlice("未使用保留块计数", "Unused Reserved Block Count", "未使用予備ブロック数"),
+            0xB8 => i18n.trSlice("端到端数据路径错误", "End-to-End Error", "エンドツーエンドエラー"),
+            0xBB => i18n.trSlice("报告不可校正错误", "Reported Uncorrectable Errors", "回復不能エラー数"),
+            0xBC => i18n.trSlice("命令超时", "Command Timeout", "コマンドタイムアウト"),
+            0xBE => i18n.trSlice("气流温度", "Airflow Temperature", "エアフロー温度"),
+            0xC1 => i18n.trSlice("磁头加载/卸载次数", "Load/Unload Cycle Count", "ロード/アンロード回数"),
+            0xC2 => i18n.trSlice("磁盘温度", "Temperature", "温度"),
+            0xC4 => i18n.trSlice("重映射事件计数", "Reallocation Event Count", "代替処理保留イベント数"),
+            0xC5 => i18n.trSlice("当前待处理扇区", "Current Pending Sector Count", "代替処理保留中のセクタ数"),
+            0xC6 => i18n.trSlice("离线不可校正扇区", "Offline Uncorrectable Sector Count", "回復不能セクタ数"),
+            0xC7 => i18n.trSlice("接口 CRC 传输错误", "UltraDMA CRC Error Count", "UltraDMA CRC エラー数"),
+            0xE7 => i18n.trSlice("SSD 剩余寿命", "SSD Life Left", "SSD 残り寿命"),
+            0xE9 => i18n.trSlice("介质磨损指标", "Media Wearout Indicator", "メディア消耗度"),
+            0xF1 => i18n.trSlice("累计写入 LBA", "Total LBAs Written", "総書込量 (LBA)"),
+            0xF2 => i18n.trSlice("累计读取 LBA", "Total LBAs Read", "総読込量 (LBA)"),
+            else => i18n.trSlice("未知属性", "Unknown Attribute", "不明な属性"),
         };
     }
 };
@@ -92,12 +93,16 @@ pub const AtaSmartData = struct {
 
     pub fn temperatureCelsius(self: *const AtaSmartData) ?i32 {
         if (self.findAttr(0xC2)) |a| {
-            const c: i32 = @as(i8, @bitCast(a.raw_bytes[0]));
-            if (c >= -20 and c <= 120) return c;
+            if (a.raw_bytes[0] != 0) {
+                const c: i32 = @as(i8, @bitCast(a.raw_bytes[0]));
+                if (c >= -20 and c <= 120) return c;
+            }
         }
         if (self.findAttr(0xBE)) |a| {
-            const c: i32 = @as(i8, @bitCast(a.raw_bytes[0]));
-            if (c >= -20 and c <= 120) return c;
+            if (a.raw_bytes[0] != 0) {
+                const c: i32 = @as(i8, @bitCast(a.raw_bytes[0]));
+                if (c >= -20 and c <= 120) return c;
+            }
         }
         return null;
     }

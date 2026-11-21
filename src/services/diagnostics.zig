@@ -1,5 +1,6 @@
 const std = @import("std");
 const monitoring = @import("monitoring.zig");
+const i18n = @import("../core/i18n.zig");
 
 /// 规范 §9 第 14 条 / §13：脱敏诊断报告导出（所有序列号均脱敏，绝不导出完整序列号）。
 pub fn buildSanitizedDiagnosticsReport(
@@ -12,25 +13,32 @@ pub fn buildSanitizedDiagnosticsReport(
     errdefer out.deinit(allocator);
     const w = out.writer(allocator);
 
-    try w.print("# WinHardware Monitor 脱敏诊断报告\n", .{});
-    try w.print("生成时间 (UTC ms): {d}\n", .{std.time.milliTimestamp()});
-    try w.print("运行权限: {s}\n", .{if (is_admin) "Administrator" else "Standard User"});
-    try w.print("部署模式: {s}\n\n", .{if (is_portable) "Portable" else "Installed"});
+    try w.print("# {s}\n", .{i18n.trSlice(
+        "WinHardware Monitor 脱敏诊断报告",
+        "WinHardware Monitor Sanitized Diagnostics Report",
+        "WinHardware Monitor 匿名化診断レポート",
+    )});
+    try w.print("{s}: {d}\n", .{ i18n.trSlice("生成时间 (UTC ms)", "Generated (UTC ms)", "生成日時 (UTC ms)"), std.time.milliTimestamp() });
+    try w.print("{s}: {s}\n", .{ i18n.trSlice("运行权限", "Privilege", "実行権限"), if (is_admin) "Administrator" else "Standard User" });
+    try w.print("{s}: {s}\n\n", .{ i18n.trSlice("部署模式", "Deployment", "配置モード"), if (is_portable) "Portable" else "Installed" });
 
-    try w.print("## 系统与 CPU / 内存\n", .{});
+    try w.print("## {s}\n", .{i18n.trSlice("系统与 CPU / 内存", "System, CPU & Memory", "システム・CPU・メモリ")});
     if (tel.has_system_sample) {
-        try w.print("CPU: {s} ({d} 逻辑核心, 基础频率 {d} MHz)\n", .{
+        try w.print("CPU: {s} ({d} {s}, Base {d} MHz)\n", .{
             tel.system.cpuNameSlice(),
             tel.system.logical_cores,
+            i18n.trSlice("逻辑核心", "Logical Cores", "論理コア"),
             tel.system.base_clock_mhz,
         });
-        try w.print("运行时间: {d} 秒\n", .{tel.system.uptime_seconds});
-        try w.print("内存: {d} / {d} MB\n", .{
+        try w.print("{s}: {d} s\n", .{ i18n.trSlice("运行时间", "Uptime", "稼働時間"), tel.system.uptime_seconds });
+        try w.print("{s}: {d} / {d} MB\n", .{
+            i18n.trSlice("内存", "Memory", "メモリ"),
             tel.system.mem_used_bytes / (1024 * 1024),
             tel.system.mem_total_bytes / (1024 * 1024),
         });
         if (tel.system.smbios_info.available) {
-            try w.print("主板: {s} {s} ({s})\n", .{
+            try w.print("{s}: {s} {s} ({s})\n", .{
+                i18n.trSlice("主板", "Motherboard", "マザーボード"),
                 tel.system.smbios_info.boardManufacturer(),
                 tel.system.smbios_info.boardProduct(),
                 tel.system.smbios_info.boardVersion(),
@@ -59,7 +67,11 @@ pub fn buildSanitizedDiagnosticsReport(
         });
     }
 
-    try w.print("\n## 物理磁盘与健康规则（序列号已脱敏）\n", .{});
+    try w.print("\n## {s}\n", .{i18n.trSlice(
+        "物理磁盘与健康规则（序列号已脱敏）",
+        "Physical Disks & Health Rules (Serials Masked)",
+        "物理ディスク・健康ルール（シリアル番号マスク済）",
+    )});
     for (tel.disk_states[0..tel.disk_count]) |ds| {
         var mb: [160]u8 = undefined;
         const model = ds.device.modelDisplay(&mb);

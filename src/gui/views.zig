@@ -8,11 +8,12 @@ const monitoring = @import("../services/monitoring.zig");
 const SharedTelemetry = monitoring.SharedTelemetry;
 const benchmarks = @import("../core/benchmarks.zig");
 const BenchmarkSnapshot = benchmarks.BenchmarkSnapshot;
+const i18n = @import("../core/i18n.zig");
 
-/// 规范 §7 + V2.0 全页面视图：
+/// 规范 §7 + V2.0 全页面三语视图（简体中文 / English / 日本語）：
 /// - 全部卡片依据窗口剩余高度动态延展，消除底部大面积空白；
 /// - 全部长文本采用结构化分行与 textWrapped 自动换行，并允许卡片内滚动，确保文字 100% 完整可见；
-/// - 全面适配深色 / 浅色（黑白）双主题。
+/// - 全面适配深色 / 浅色（黑白）双主题与中英日实时无缝切换。
 pub fn renderCurrentPage(state: *AppState, tel: *const SharedTelemetry, bench: *const BenchmarkSnapshot) void {
     const s = state.dpi_scale;
 
@@ -39,9 +40,21 @@ fn formatUptime(secs: u64, buf: *[64]u8) [:0]const u8 {
     const hours = (secs % 86400) / 3600;
     const mins = (secs % 3600) / 60;
     if (days > 0) {
-        return std.fmt.bufPrintZ(buf, "{d}天 {d}小时 {d}分", .{ days, hours, mins }) catch "N/A";
+        return std.fmt.bufPrintZ(buf, "{d}{s} {d}{s} {d}{s}", .{
+            days,
+            i18n.trSlice("天", "d", "日"),
+            hours,
+            i18n.trSlice("小时", "h", "時間"),
+            mins,
+            i18n.trSlice("分", "m", "分"),
+        }) catch "N/A";
     }
-    return std.fmt.bufPrintZ(buf, "{d}小时 {d}分", .{ hours, mins }) catch "N/A";
+    return std.fmt.bufPrintZ(buf, "{d}{s} {d}{s}", .{
+        hours,
+        i18n.trSlice("小时", "h", "時間"),
+        mins,
+        i18n.trSlice("分", "m", "分"),
+    }) catch "N/A";
 }
 
 fn renderTopHeader(state: *AppState, _: *const SharedTelemetry) void {
@@ -52,14 +65,17 @@ fn renderTopHeader(state: *AppState, _: *const SharedTelemetry) void {
     zgui.popFont();
 
     zgui.sameLine(.{});
-    const right_w = 240.0 * s;
+    const right_w = 270.0 * s;
     const avail_w = zgui.getContentRegionAvail()[0];
     if (avail_w > right_w) {
         zgui.setCursorPosX(zgui.getCursorPosX() + avail_w - right_w);
     }
 
-    var alert_buf: [48]u8 = undefined;
-    const alert_txt = std.fmt.bufPrintZ(&alert_buf, "当前告警: {d}", .{state.active_alert_count}) catch "当前告警: 0";
+    var alert_buf: [64]u8 = undefined;
+    const alert_txt = std.fmt.bufPrintZ(&alert_buf, "{s}: {d}", .{
+        i18n.tr("当前告警", "Alerts", "アラート"),
+        state.active_alert_count,
+    }) catch "Alerts: 0";
     widgets.drawStatusPill(
         alert_txt,
         if (state.active_alert_count == 0) p.status_ok else p.status_critical,
@@ -67,7 +83,10 @@ fn renderTopHeader(state: *AppState, _: *const SharedTelemetry) void {
     );
     zgui.sameLine(.{});
     widgets.drawStatusPill(
-        if (state.monitoring_paused) "采集已暂停" else "实时采集中",
+        if (state.monitoring_paused)
+            i18n.tr("采集已暂停", "Paused", "一時停止中")
+        else
+            i18n.tr("实时采集中", "Live Monitoring", "リアルタイム監視"),
         if (state.monitoring_paused) p.status_caution else p.accent_blue,
         s,
     );
@@ -81,13 +100,20 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
     const avail_h = avail[1];
     const gap = 12.0 * s;
 
-    // 动态占满整个可视高度：上排 44%，下排占满剩余全部高度（彻底消除底部大片留白与文字截断）
     const col3_w = @max(220.0 * s, (avail_w - gap * 2.0) / 3.0);
     const row1_h = @max(248.0 * s, (avail_h - gap) * 0.44);
     const row2_h = @max(310.0 * s, avail_h - row1_h - gap);
 
     // Card 1: 内存占用环形仪表
-    if (widgets.beginCard("##dash_mem_donut", "物理内存占用", "GlobalMemoryStatusEx 实时采样", col3_w, row1_h, s, null)) {
+    if (widgets.beginCard(
+        "##dash_mem_donut",
+        i18n.tr("物理内存占用", "Physical Memory", "物理メモリ使用率"),
+        i18n.tr("系统内存实时采样", "Live OS memory telemetry", "OS メモリリアルタイム計測"),
+        col3_w,
+        row1_h,
+        s,
+        null,
+    )) {
         const inner_h = @max(150.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         if (tel.has_system_sample and tel.system.mem_load_pct != null) {
             const pct = tel.system.mem_load_pct.?;
@@ -99,12 +125,20 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
             const foot_txt = if (tel.system.smbios_info.primaryMemorySpeedMhz()) |spd|
                 std.fmt.bufPrintZ(&foot_buf, "{d:.1} / {d:.1} GB  •  {d} MHz", .{ used_gb, total_gb, spd }) catch ""
             else
-                std.fmt.bufPrintZ(&foot_buf, "已用 {d:.1} GB / 总计 {d:.1} GB", .{ used_gb, total_gb }) catch "";
+                std.fmt.bufPrintZ(&foot_buf, "{d:.1} / {d:.1} GB", .{ used_gb, total_gb }) catch "";
 
             const col = if (pct >= 90.0) p.status_critical else if (pct >= 80.0) p.status_caution else p.status_ok;
-            widgets.drawDonutGauge(@floatCast(pct / 100.0), big_txt, "已使用", foot_txt, col, inner_h, s);
+            widgets.drawDonutGauge(@floatCast(pct / 100.0), big_txt, i18n.tr("已使用", "Used", "使用中"), foot_txt, col, inner_h, s);
         } else {
-            widgets.drawDonutGauge(null, "采集中", "初始化", "正在等待首个系统快照", p.accent_blue, inner_h, s);
+            widgets.drawDonutGauge(
+                null,
+                i18n.tr("采集中", "Loading", "計測中"),
+                i18n.tr("初始化", "Init", "初期化"),
+                i18n.tr("正在等待首个系统快照", "Waiting for first snapshot", "初回スナップショット待機中"),
+                p.accent_blue,
+                inner_h,
+                s,
+            );
         }
     }
     widgets.endCard();
@@ -112,19 +146,27 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
     zgui.sameLine(.{ .spacing = gap });
 
     // Card 2: 内存实时面积趋势图
-    if (widgets.beginCard("##dash_mem_card", "内存使用趋势", "内存环形缓冲区（最近 60 秒窗口）", col3_w, row1_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##dash_mem_card",
+        i18n.tr("内存使用趋势", "Memory Usage Trend", "メモリ使用率推移"),
+        i18n.tr("内存环形缓冲区（最近 60 秒窗口）", "Ring buffer (last 60s window)", "リングバッファ（直近60秒）"),
+        col3_w,
+        row1_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(150.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         widgets.drawLiveAreaPlot(
             monitoring.HISTORY_CAPACITY,
             "##dash_mem_plot",
-            "内存%",
+            "RAM%",
             "%",
             0,
             100,
             "%",
             p.accent_blue,
             &tel.mem_usage_history,
-            "等待首个内存采集样本...",
+            i18n.tr("等待首个内存采集样本...", "Waiting for memory sample...", "メモリ計測待機中..."),
             inner_h,
             s,
         );
@@ -134,7 +176,15 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
     zgui.sameLine(.{ .spacing = gap });
 
     // Card 3: CPU 实时使用率圆弧仪表
-    if (widgets.beginCard("##dash_cpu_gauge", "CPU 实时占用", "PDH / GetSystemTimes 实时采样", col3_w, row1_h, s, null)) {
+    if (widgets.beginCard(
+        "##dash_cpu_gauge",
+        i18n.tr("CPU 实时占用", "CPU Load", "CPU 使用率"),
+        i18n.tr("PDH / 系统内核时间实时采样", "PDH / OS kernel counters", "PDH / カーネルカウンタ計測"),
+        col3_w,
+        row1_h,
+        s,
+        null,
+    )) {
         const inner_h = @max(150.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         if (tel.has_system_sample and tel.system.cpu_usage_pct != null) {
             const pct = tel.system.cpu_usage_pct.?;
@@ -142,24 +192,39 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
             var cap_buf: [96]u8 = undefined;
             const val_txt = std.fmt.bufPrintZ(&val_buf, "{d:.1}%", .{pct}) catch "N/A";
             const cap_txt = if (tel.system.cpu_clock_mhz) |mhz|
-                std.fmt.bufPrintZ(&cap_buf, "{d} 线程  •  {d:.2} GHz (计算值)", .{ tel.system.logical_cores, mhz / 1000.0 }) catch ""
+                std.fmt.bufPrintZ(&cap_buf, "{d} {s}  •  {d:.2} GHz", .{
+                    tel.system.logical_cores,
+                    i18n.trSlice("线程", "Threads", "スレッド"),
+                    mhz / 1000.0,
+                }) catch ""
             else
-                std.fmt.bufPrintZ(&cap_buf, "{d} 逻辑处理器", .{tel.system.logical_cores}) catch "";
+                std.fmt.bufPrintZ(&cap_buf, "{d} {s}", .{
+                    tel.system.logical_cores,
+                    i18n.trSlice("逻辑处理器", "Logical CPUs", "論理プロセッサ"),
+                }) catch "";
             const col = if (pct >= 90.0) p.status_critical else if (pct >= 75.0) p.status_caution else p.status_ok;
             widgets.drawArcGauge(@floatCast(pct / 100.0), val_txt, cap_txt, col, inner_h, s);
         } else {
-            widgets.drawArcGauge(null, "N/A", "正在采集首个 CPU 样本...", p.accent_blue, inner_h, s);
+            widgets.drawArcGauge(null, "N/A", i18n.tr("正在采集首个 CPU 样本...", "Waiting for CPU sample...", "CPU 計測待機中..."), p.accent_blue, inner_h, s);
         }
     }
     widgets.endCard();
 
     zgui.dummy(.{ .w = 0, .h = gap });
 
-    // Row 2: 宽曲线 + 传感器状态表（自适应占满窗口剩余全部高度）
+    // Row 2: 宽曲线 + 传感器状态表
     const wide_w = @max(320.0 * s, (avail_w - gap) * 0.56);
     const side_w = @max(300.0 * s, avail_w - wide_w - gap);
 
-    if (widgets.beginCard("##dash_cpu_trend", "CPU 使用率实时趋势", "数据源：PDH % Processor Utility（回退 GetSystemTimes）", wide_w, row2_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##dash_cpu_trend",
+        i18n.tr("CPU 使用率实时趋势", "CPU Usage History", "CPU 使用率推移"),
+        i18n.tr("数据源：PDH % Processor Utility（回退 GetSystemTimes）", "Source: PDH % Processor Utility (fallback GetSystemTimes)", "取得元：PDH / OS システム時間"),
+        wide_w,
+        row2_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         widgets.drawLiveAreaPlot(
             monitoring.HISTORY_CAPACITY,
@@ -171,7 +236,7 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
             "%",
             p.accent_cyan,
             &tel.cpu_usage_history,
-            "等待首个 CPU 采集样本...",
+            i18n.tr("等待首个 CPU 采集样本...", "Waiting for CPU sample...", "CPU 計測待機中..."),
             inner_h,
             s,
         );
@@ -180,14 +245,22 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##dash_status_card", "传感器采集状态", "按规范 §1.2.1 权限能力矩阵实时报告", side_w, row2_h, s, null)) {
+    if (widgets.beginCard(
+        "##dash_status_card",
+        i18n.tr("传感器采集状态", "Sensor Acquisition Status", "センサー取得ステータス"),
+        i18n.tr("按规范 §1.2.1 权限能力矩阵实时报告", "Live capability matrix (§1.2.1)", "権限マトリクス準拠のリアルタイム状態"),
+        side_w,
+        row2_h,
+        s,
+        null,
+    )) {
         if (zgui.beginTable("##dash_sensor_tbl", .{
             .column = 3,
             .flags = .{ .borders = .{ .inner_h = true }, .sizing = .stretch_prop },
         })) {
-            zgui.tableSetupColumn("传感器项目", .{ .init_width_or_height = 1.4 });
-            zgui.tableSetupColumn("当前读数", .{ .init_width_or_height = 0.85 });
-            zgui.tableSetupColumn("状态 / 来源", .{ .init_width_or_height = 1.15 });
+            zgui.tableSetupColumn(i18n.tr("传感器项目", "Sensor", "センサー項目"), .{ .init_width_or_height = 1.4 });
+            zgui.tableSetupColumn(i18n.tr("当前读数", "Value", "現在値"), .{ .init_width_or_height = 0.85 });
+            zgui.tableSetupColumn(i18n.tr("状态 / 来源", "Status / Source", "状態 / 取得元"), .{ .init_width_or_height = 1.15 });
             zgui.tableHeadersRow();
 
             var cpu_val_buf: [32]u8 = undefined;
@@ -195,14 +268,32 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
                 std.fmt.bufPrintZ(&cpu_val_buf, "{d:.1}%", .{tel.system.cpu_usage_pct.?}) catch "N/A"
             else
                 "N/A";
-            widgets.drawMetricTableRow("CPU 使用率", cpu_val, if (tel.has_system_sample) tel.system.cpu_usage_status else .unknown, if (tel.has_system_sample and tel.system.cpu_usage_status == .ok) "实测值" else "采集中", s);
+            widgets.drawMetricTableRow(
+                i18n.tr("CPU 使用率", "CPU Usage", "CPU 使用率"),
+                cpu_val,
+                if (tel.has_system_sample) tel.system.cpu_usage_status else .unknown,
+                if (tel.has_system_sample and tel.system.cpu_usage_status == .ok)
+                    i18n.tr("实测值", "Measured", "実測値")
+                else
+                    i18n.tr("采集中", "Sampling", "計測中"),
+                s,
+            );
 
             var clk_val_buf: [32]u8 = undefined;
             const clk_val = if (tel.has_system_sample and tel.system.cpu_clock_mhz != null)
                 std.fmt.bufPrintZ(&clk_val_buf, "{d:.2} GHz", .{tel.system.cpu_clock_mhz.? / 1000.0}) catch "N/A"
             else
                 "N/A";
-            widgets.drawMetricTableRow("CPU 频率", clk_val, if (tel.has_system_sample) tel.system.cpu_clock_status else .unknown, if (tel.has_system_sample and tel.system.cpu_clock_status == .ok) "计算值" else "采集中", s);
+            widgets.drawMetricTableRow(
+                i18n.tr("CPU 频率", "CPU Clock", "CPU クロック"),
+                clk_val,
+                if (tel.has_system_sample) tel.system.cpu_clock_status else .unknown,
+                if (tel.has_system_sample and tel.system.cpu_clock_status == .ok)
+                    i18n.tr("计算值", "Computed", "算出値")
+                else
+                    i18n.tr("采集中", "Sampling", "計測中"),
+                s,
+            );
 
             if (tel.extension.connected and tel.extension.cpu_package_temp_c != null) {
                 var ct_buf: [32]u8 = undefined;
@@ -210,13 +301,13 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
                     state.temp_unit.convert(tel.extension.cpu_package_temp_c.?),
                     state.temp_unit.symbol(),
                 }) catch "N/A";
-                widgets.drawMetricTableRow("CPU 封装温度", ct_txt, .ok, "扩展组件 (LHM)", s);
+                widgets.drawMetricTableRow(i18n.tr("CPU 封装温度", "CPU Package Temp", "CPU パッケージ温度"), ct_txt, .ok, i18n.tr("扩展组件 (LHM)", "Extension (LHM)", "拡張機能 (LHM)"), s);
             } else {
                 widgets.drawMetricTableRow(
-                    "CPU 封装温度",
+                    i18n.tr("CPU 封装温度", "CPU Package Temp", "CPU パッケージ温度"),
                     "N/A",
                     if (state.extension_enabled) .transient_error else .requires_extension,
-                    if (state.extension_enabled) "等待辅助进程" else "需要扩展组件",
+                    if (state.extension_enabled) i18n.tr("等待辅助进程", "Waiting Helper", "ヘルパー待機中") else i18n.tr("需要扩展组件", "Extension Req.", "拡張機能が必要"),
                     s,
                 );
             }
@@ -225,9 +316,9 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
                 const g0 = &tel.gpu.gpus[0];
                 var gt_buf: [32]u8 = undefined;
                 const gt_txt = std.fmt.bufPrintZ(&gt_buf, "{d:.1}{s}", .{ state.temp_unit.convert(g0.temp_c.?), state.temp_unit.symbol() }) catch "N/A";
-                widgets.drawMetricTableRow("GPU 温度", gt_txt, g0.temp_status, g0.temp_source, s);
+                widgets.drawMetricTableRow(i18n.tr("GPU 温度", "GPU Temp", "GPU 温度"), gt_txt, g0.temp_status, g0.temp_source, s);
             } else {
-                widgets.drawMetricTableRow("GPU 温度", "N/A", .unsupported, "无传感器", s);
+                widgets.drawMetricTableRow(i18n.tr("GPU 温度", "GPU Temp", "GPU 温度"), "N/A", .unsupported, i18n.tr("无传感器", "No Sensor", "センサーなし"), s);
             }
 
             if (tel.has_disk_inventory and tel.disk_count > 0) {
@@ -237,28 +328,31 @@ fn renderDashboard(state: *AppState, tel: *const SharedTelemetry) void {
                     std.fmt.bufPrintZ(&dt_buf, "{d:.0}{s}", .{ state.temp_unit.convert(@floatFromInt(tc)), state.temp_unit.symbol() }) catch "N/A"
                 else
                     "N/A";
-                widgets.drawMetricTableRow("主磁盘温度 / 健康", dt_txt, d0.effectiveTempStatus(), d0.assessment.overall.labelZh(), s);
+                widgets.drawMetricTableRow(i18n.tr("主磁盘温度 / 健康", "Disk 0 Temp / Health", "ディスク0 温度/健康"), dt_txt, d0.effectiveTempStatus(), d0.assessment.overall.labelZh(), s);
             } else {
-                widgets.drawMetricTableRow("物理磁盘 SMART", "N/A", .unknown, "枚举中", s);
+                widgets.drawMetricTableRow(i18n.tr("物理磁盘 SMART", "Physical Disk SMART", "物理ディスク SMART"), "N/A", .unknown, i18n.tr("枚举中", "Scanning", "スキャン中"), s);
             }
 
             widgets.drawMetricTableRow(
                 "ATA SMART (SATA)",
                 "N/A",
                 if (state.is_admin) .unknown else .access_denied,
-                if (state.is_admin) "按盘检测" else "需要管理员",
+                if (state.is_admin) i18n.tr("按盘检测", "Per-Disk", "ドライブ別検出") else i18n.tr("需要管理员", "Admin Req.", "管理者権限が必要"),
                 s,
             );
             if (tel.extension.connected and tel.extension.sensor_count > 0) {
-                var ext_cnt_buf: [32]u8 = undefined;
-                const ext_cnt_txt = std.fmt.bufPrintZ(&ext_cnt_buf, "{d} 项在线", .{tel.extension.sensor_count}) catch "在线";
-                widgets.drawMetricTableRow("主板 / Super I/O", ext_cnt_txt, .ok, "扩展组件 (LHM)", s);
+                var ext_cnt_buf: [48]u8 = undefined;
+                const ext_cnt_txt = std.fmt.bufPrintZ(&ext_cnt_buf, "{d} {s}", .{
+                    tel.extension.sensor_count,
+                    i18n.trSlice("项在线", "online", "件稼働"),
+                }) catch "Online";
+                widgets.drawMetricTableRow(i18n.tr("主板 / Super I/O", "Board / Super I/O", "マザーボード / I/O"), ext_cnt_txt, .ok, i18n.tr("扩展组件 (LHM)", "Extension (LHM)", "拡張機能 (LHM)"), s);
             } else {
                 widgets.drawMetricTableRow(
-                    "主板 / Super I/O",
+                    i18n.tr("主板 / Super I/O", "Board / Super I/O", "マザーボード / I/O"),
                     "N/A",
                     if (state.extension_enabled) .transient_error else .requires_extension,
-                    if (state.extension_enabled) "辅助进程未连" else "需要扩展组件",
+                    if (state.extension_enabled) i18n.tr("辅助进程未连", "Helper Offline", "ヘルパー未接続") else i18n.tr("需要扩展组件", "Extension Req.", "拡張機能が必要"),
                     s,
                 );
             }
@@ -278,21 +372,32 @@ fn renderCpuView(state: *AppState, tel: *const SharedTelemetry) void {
     const top_h = 205.0 * s;
     const bot_h = @max(260.0 * s, avail[1] - top_h - gap);
 
-    if (widgets.beginCard("##cpu_meta", "处理器规格与每核实时负载", "数据来源：Windows 注册表 / GetSystemInfo / PDH / NtQuerySystemInformation", -1.0, top_h, s, null)) {
+    if (widgets.beginCard(
+        "##cpu_meta",
+        i18n.tr("处理器规格与每核实时负载", "Processor Specs & Per-Core Load", "プロセッサ仕様・コア別負荷"),
+        i18n.tr("数据来源：系统信息 / PDH / 每核内核性能计数器", "Source: OS Info / PDH / Per-Core Kernel Counters", "取得元：OS 情報 / PDH / コア別カーネルカウンタ"),
+        -1.0,
+        top_h,
+        s,
+        null,
+    )) {
         if (tel.has_system_sample) {
             zgui.pushFont(null, 18.0 * s);
             zgui.textColored(p.text_primary, "{s}", .{tel.system.cpuNameSlice()});
             zgui.popFont();
             zgui.dummy(.{ .w = 0, .h = 4.0 * s });
 
-            var line1: [200]u8 = undefined;
-            const s1 = std.fmt.bufPrint(&line1, "{d} 线程   •   基础频率 {d} MHz   •   来源：{s} ({s})", .{
+            var line1: [220]u8 = undefined;
+            const s1 = std.fmt.bufPrint(&line1, "{d} {s}   •   {s} {d} MHz   •   {s}: {s} ({s})", .{
                 tel.system.logical_cores,
+                i18n.trSlice("线程", "Threads", "スレッド"),
+                i18n.trSlice("基础频率", "Base Clock", "ベースクロック"),
                 tel.system.base_clock_mhz,
+                i18n.trSlice("来源", "Source", "取得元"),
                 tel.system.cpu_clock_source,
                 tel.system.cpu_clock_accuracy.labelZh(),
             }) catch "";
-            widgets.drawKeyValueLine("核心与频率", s1);
+            widgets.drawKeyValueLine(i18n.tr("核心与频率", "Cores & Clock", "コア・クロック"), s1);
 
             if (tel.system.per_core_count > 0) {
                 zgui.dummy(.{ .w = 0, .h = 4.0 * s });
@@ -316,7 +421,7 @@ fn renderCpuView(state: *AppState, tel: *const SharedTelemetry) void {
                 }
             }
         } else {
-            zgui.textColored(p.text_muted, "正在采集处理器信息...", .{});
+            zgui.textColored(p.text_muted, "{s}", .{i18n.tr("正在采集处理器信息...", "Sampling CPU info...", "CPU 情報を取得中...")});
         }
     }
     widgets.endCard();
@@ -326,7 +431,15 @@ fn renderCpuView(state: *AppState, tel: *const SharedTelemetry) void {
     const left_w = (avail[0] - gap) * 0.66;
     const right_w = avail[0] - left_w - gap;
 
-    if (widgets.beginCard("##cpu_usage_card", "CPU 使用率实时曲线", "禁止将 ACPI 热区温度冒充 CPU 温度", left_w, bot_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##cpu_usage_card",
+        i18n.tr("CPU 使用率实时曲线", "CPU Utilization History", "CPU 使用率リアルタイム推移"),
+        i18n.tr("禁止将 ACPI 热区温度冒充 CPU 温度", "ACPI thermal zones are never misrepresented as CPU temp", "ACPI サーマルゾーンを CPU 温度として誤表示しません"),
+        left_w,
+        bot_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         widgets.drawLiveAreaPlot(
             monitoring.HISTORY_CAPACITY,
@@ -338,7 +451,7 @@ fn renderCpuView(state: *AppState, tel: *const SharedTelemetry) void {
             "%",
             p.accent_blue,
             &tel.cpu_usage_history,
-            "等待 CPU 实时采样...",
+            i18n.tr("等待 CPU 实时采样...", "Waiting for CPU sample...", "CPU サンプル待機中..."),
             inner_h,
             s,
         );
@@ -347,7 +460,15 @@ fn renderCpuView(state: *AppState, tel: *const SharedTelemetry) void {
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##cpu_temp_gauge", "CPU 封装温度", "需启用可选 LibreHardwareMonitor 扩展组件", right_w, bot_h, s, null)) {
+    if (widgets.beginCard(
+        "##cpu_temp_gauge",
+        i18n.tr("CPU 封装温度", "CPU Package Temp", "CPU パッケージ温度"),
+        i18n.tr("需启用可选 LibreHardwareMonitor 扩展组件", "Requires optional LibreHardwareMonitor extension", "任意拡張 LibreHardwareMonitor ヘルパーが必要"),
+        right_w,
+        bot_h,
+        s,
+        null,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 34.0 * s);
         if (tel.extension.connected and tel.extension.cpu_package_temp_c != null) {
             const tc = tel.extension.cpu_package_temp_c.?;
@@ -355,19 +476,22 @@ fn renderCpuView(state: *AppState, tel: *const SharedTelemetry) void {
             const vt = std.fmt.bufPrintZ(&vt_buf, "{d:.1}{s}", .{ state.temp_unit.convert(tc), state.temp_unit.symbol() }) catch "N/A";
             var cap_buf: [64]u8 = undefined;
             const cap = if (tel.extension.cpu_package_power_w) |pw|
-                std.fmt.bufPrintZ(&cap_buf, "LHM 扩展 • 封装功耗 {d:.1} W", .{pw}) catch "LHM 扩展组件"
+                std.fmt.bufPrintZ(&cap_buf, "LHM • {s} {d:.1} W", .{ i18n.trSlice("功耗", "Power", "電力"), pw }) catch "LHM"
             else
-                "扩展组件 (LHM 实测)";
+                i18n.tr("扩展组件 (LHM 实测)", "Extension (LHM Live)", "拡張機能 (LHM 実測)");
             const col = if (tc >= 90.0) p.status_critical else if (tc >= 80.0) p.status_caution else p.status_ok;
             widgets.drawArcGauge(@floatCast(std.math.clamp(tc / 100.0, 0.0, 1.0)), vt, cap, col, inner_h, s);
         } else {
             const cap: [:0]const u8 = if (state.extension_enabled)
-                (if (tel.extension.connected) "已连接但需管理员/驱动读取温度" else "辅助进程未运行")
+                (if (tel.extension.connected)
+                    i18n.tr("已连接但需管理员/驱动读取温度", "Connected; admin/driver required", "接続済（管理者権限/ドライバが必要）")
+                else
+                    i18n.tr("辅助进程未运行", "Helper not running", "ヘルパー未稼働"))
             else
-                "需要扩展组件（默认关闭）";
+                i18n.tr("需要扩展组件（默认关闭）", "Extension required (off by default)", "拡張機能が必要（初期オフ）");
             widgets.drawArcGauge(null, "N/A", cap, p.status_caution, inner_h, s);
             if (!tel.extension.connected) {
-                if (zgui.button("启动扩展组件 (需管理员)", .{ .w = -1.0, .h = 28.0 * s })) {
+                if (zgui.button(i18n.tr("启动扩展组件 (需管理员)", "Launch Extension (Admin)", "拡張ヘルパー起動 (管理者)"), .{ .w = -1.0, .h = 28.0 * s })) {
                     state.request_launch_lhm_helper = true;
                 }
             }
@@ -385,7 +509,15 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
     const top_h = 172.0 * s;
     const bot_h = @max(280.0 * s, avail[1] - top_h - gap);
 
-    if (widgets.beginCard("##gpu_meta", "图形处理器规格与实时参数", "数据源：动态 NVML / 通用 D3DKMT（普通用户权限可用）", -1.0, top_h, s, null)) {
+    if (widgets.beginCard(
+        "##gpu_meta",
+        i18n.tr("图形处理器规格与实时参数", "GPU Specs & Live Telemetry", "GPU 仕様・リアルタイム計測"),
+        i18n.tr("数据源：动态 NVML / 通用 D3DKMT（普通用户权限可用）", "Source: Dynamic NVML / D3DKMT (standard user supported)", "取得元：動的 NVML / 汎用 D3DKMT（標準権限対応）"),
+        -1.0,
+        top_h,
+        s,
+        null,
+    )) {
         if (tel.has_gpu_sample and tel.gpu.count > 0) {
             const g0 = &tel.gpu.gpus[0];
             zgui.pushFont(null, 18.0 * s);
@@ -393,7 +525,7 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
             zgui.popFont();
             zgui.dummy(.{ .w = 0, .h = 6.0 * s });
 
-            var row1: [200]u8 = undefined;
+            var row1: [220]u8 = undefined;
             var pwr_buf: [24]u8 = undefined;
             const pwr_txt = if (g0.power_watts) |w| std.fmt.bufPrint(&pwr_buf, "{d:.1} W", .{w}) catch "N/A" else "N/A";
             var vram_buf: [40]u8 = undefined;
@@ -406,15 +538,21 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
                 "N/A";
             var util_buf: [16]u8 = undefined;
             const util_txt = if (g0.usage_pct) |u| std.fmt.bufPrint(&util_buf, "{d:.0}%", .{u}) catch "N/A" else "N/A";
-            const r1 = std.fmt.bufPrint(&row1, "功耗 {s}   •   显存 {s}   •   占用率 {s}", .{ pwr_txt, vram_txt, util_txt }) catch "";
-            widgets.drawKeyValueLine("功耗与显存", r1);
+            const r1 = std.fmt.bufPrint(&row1, "{s} {s}   •   VRAM {s}   •   {s} {s}", .{
+                i18n.trSlice("功耗", "Power", "電力"),
+                pwr_txt,
+                vram_txt,
+                i18n.trSlice("占用率", "Load", "使用率"),
+                util_txt,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("功耗与显存", "Power & VRAM", "電力・VRAM"), r1);
 
-            var row2: [200]u8 = undefined;
-            var clk_buf: [48]u8 = undefined;
+            var row2: [220]u8 = undefined;
+            var clk_buf: [64]u8 = undefined;
             const clk_txt = if (g0.core_clock_mhz) |c|
-                std.fmt.bufPrint(&clk_buf, "核心 {d} MHz / 显存 {d} MHz", .{ c, g0.mem_clock_mhz orelse 0 }) catch "N/A"
+                std.fmt.bufPrint(&clk_buf, "{s} {d} MHz / VRAM {d} MHz", .{ i18n.trSlice("核心", "Core", "コア"), c, g0.mem_clock_mhz orelse 0 }) catch "N/A"
             else if (g0.mem_clock_mhz) |m|
-                std.fmt.bufPrint(&clk_buf, "显存 {d} MHz", .{m}) catch "N/A"
+                std.fmt.bufPrint(&clk_buf, "VRAM {d} MHz", .{m}) catch "N/A"
             else
                 "N/A";
             var fan_buf: [24]u8 = undefined;
@@ -424,10 +562,17 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
                 std.fmt.bufPrint(&fan_buf, "{d}%", .{fp}) catch "N/A"
             else
                 "N/A";
-            const r2 = std.fmt.bufPrint(&row2, "{s}   •   风扇 {s}   •   温度来源 {s}   •   显卡总数 {d}", .{ clk_txt, fan_txt, g0.temp_source, tel.gpu.count }) catch "";
-            widgets.drawKeyValueLine("频率与散热", r2);
+            const r2 = std.fmt.bufPrint(&row2, "{s}   •   {s} {s}   •   {s}: {s}   •   GPUs: {d}", .{
+                clk_txt,
+                i18n.trSlice("风扇", "Fan", "ファン"),
+                fan_txt,
+                i18n.trSlice("温度来源", "Temp Source", "温度取得元"),
+                g0.temp_source,
+                tel.gpu.count,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("频率与散热", "Clocks & Cooling", "クロック・冷却"), r2);
         } else {
-            zgui.textColored(p.text_muted, "正在采集 GPU 信息...", .{});
+            zgui.textColored(p.text_muted, "{s}", .{i18n.tr("正在采集 GPU 信息...", "Sampling GPU info...", "GPU 情報を取得中...")});
         }
     }
     widgets.endCard();
@@ -437,7 +582,15 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
     const left_w = (avail[0] - gap) * 0.66;
     const right_w = avail[0] - left_w - gap;
 
-    if (widgets.beginCard("##gpu_trend_card", "GPU 温度实时曲线", "实时面积趋势 + 当前 / 平均 / 峰值 统计", left_w, bot_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##gpu_trend_card",
+        i18n.tr("GPU 温度实时曲线", "GPU Temperature History", "GPU 温度推移"),
+        i18n.tr("实时面积趋势 + 当前 / 平均 / 峰值 统计", "Live area trend + Cur / Avg / Max stats", "リアルタイム推移＋現在/平均/最大統計"),
+        left_w,
+        bot_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         widgets.drawLiveAreaPlot(
             monitoring.HISTORY_CAPACITY,
@@ -449,7 +602,7 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
             "°C",
             p.status_ok,
             &tel.gpu_temp_history,
-            "等待 GPU 温度样本...",
+            i18n.tr("等待 GPU 温度样本...", "Waiting for GPU temp sample...", "GPU 温度サンプル待機中..."),
             inner_h,
             s,
         );
@@ -458,7 +611,15 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##gpu_gauge_card", "GPU 核心温度", "多 GPU 独立 Provider 隔离", right_w, bot_h, s, null)) {
+    if (widgets.beginCard(
+        "##gpu_gauge_card",
+        i18n.tr("GPU 核心温度", "GPU Core Temperature", "GPU コア温度"),
+        i18n.tr("多 GPU 独立 Provider 隔离", "Isolated per-GPU telemetry provider", "マルチ GPU 独立プロバイダ分離"),
+        right_w,
+        bot_h,
+        s,
+        null,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         if (tel.has_gpu_sample and tel.gpu.count > 0 and tel.gpu.gpus[0].temp_c != null) {
             const tc = tel.gpu.gpus[0].temp_c.?;
@@ -468,7 +629,7 @@ fn renderGpuView(state: *AppState, tel: *const SharedTelemetry) void {
             const col = if (tc >= 90.0) p.status_critical else if (tc >= 80.0) p.status_caution else p.status_ok;
             widgets.drawArcGauge(@floatCast(std.math.clamp(tc / 100.0, 0.0, 1.0)), vt, tel.gpu.gpus[0].temp_source, col, inner_h, s);
         } else {
-            widgets.drawArcGauge(null, "N/A", "无可用 GPU 温度传感器", p.status_unknown, inner_h, s);
+            widgets.drawArcGauge(null, "N/A", i18n.tr("无可用 GPU 温度传感器", "No GPU temperature sensor", "GPU 温度センサーなし"), p.status_unknown, inner_h, s);
         }
     }
     widgets.endCard();
@@ -485,7 +646,15 @@ fn renderMemoryView(state: *AppState, tel: *const SharedTelemetry) void {
     const left_w = @max(240.0 * s, (avail[0] - gap) * 0.34);
     const right_w = avail[0] - left_w - gap;
 
-    if (widgets.beginCard("##mem_donut_card", "物理内存使用率", "GlobalMemoryStatusEx 实时数据", left_w, top_h, s, null)) {
+    if (widgets.beginCard(
+        "##mem_donut_card",
+        i18n.tr("物理内存使用率", "Physical Memory Load", "物理メモリ使用率"),
+        i18n.tr("系统内存实时数据", "Live physical memory usage", "リアルタイム物理メモリ計測"),
+        left_w,
+        top_h,
+        s,
+        null,
+    )) {
         const inner_h = @max(150.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         if (tel.has_system_sample and tel.system.mem_load_pct != null) {
             const pct = tel.system.mem_load_pct.?;
@@ -493,31 +662,45 @@ fn renderMemoryView(state: *AppState, tel: *const SharedTelemetry) void {
             const avail_gb = @as(f64, @floatFromInt(tel.system.mem_avail_bytes)) / (1024.0 * 1024.0 * 1024.0);
             const total_gb = @as(f64, @floatFromInt(tel.system.mem_total_bytes)) / (1024.0 * 1024.0 * 1024.0);
             var big_buf: [32]u8 = undefined;
-            var foot_buf: [80]u8 = undefined;
+            var foot_buf: [96]u8 = undefined;
             const big_txt = std.fmt.bufPrintZ(&big_buf, "{d:.1}%", .{pct}) catch "N/A";
-            const foot_txt = std.fmt.bufPrintZ(&foot_buf, "已用 {d:.1} GB  •  可用 {d:.1} / {d:.1} GB", .{ used_gb, avail_gb, total_gb }) catch "";
-            widgets.drawDonutGauge(@floatCast(pct / 100.0), big_txt, "已使用", foot_txt, p.accent_blue, inner_h, s);
+            const foot_txt = std.fmt.bufPrintZ(&foot_buf, "{s} {d:.1} GB  •  {s} {d:.1} / {d:.1} GB", .{
+                i18n.trSlice("已用", "Used", "使用"),
+                used_gb,
+                i18n.trSlice("可用", "Free", "空き"),
+                avail_gb,
+                total_gb,
+            }) catch "";
+            widgets.drawDonutGauge(@floatCast(pct / 100.0), big_txt, i18n.tr("已使用", "Used", "使用中"), foot_txt, p.accent_blue, inner_h, s);
         } else {
-            widgets.drawDonutGauge(null, "N/A", "采集中", "正在读取系统内存", p.accent_blue, inner_h, s);
+            widgets.drawDonutGauge(null, "N/A", i18n.tr("采集中", "Sampling", "計測中"), i18n.tr("正在读取系统内存", "Reading OS memory", "メモリ情報取得中"), p.accent_blue, inner_h, s);
         }
     }
     widgets.endCard();
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##mem_trend_card", "内存使用历史趋势", "实时环形缓冲区（每 2 秒采样）", right_w, top_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##mem_trend_card",
+        i18n.tr("内存使用历史趋势", "Memory Usage History", "メモリ使用率履歴"),
+        i18n.tr("实时环形缓冲区（每 2 秒采样）", "Live ring buffer (2s polling)", "リングバッファ（2秒間隔）"),
+        right_w,
+        top_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(150.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
         widgets.drawLiveAreaPlot(
             monitoring.HISTORY_CAPACITY,
             "##mem_plot",
-            "内存%",
+            "RAM%",
             "%",
             0,
             100,
             "%",
             p.accent_blue,
             &tel.mem_usage_history,
-            "等待首个内存采集样本...",
+            i18n.tr("等待首个内存采集样本...", "Waiting for memory sample...", "メモリ計測待機中..."),
             inner_h,
             s,
         );
@@ -526,19 +709,27 @@ fn renderMemoryView(state: *AppState, tel: *const SharedTelemetry) void {
 
     zgui.dummy(.{ .w = 0, .h = gap });
 
-    if (widgets.beginCard("##mem_dimm_table", "SMBIOS 物理内存插槽明细", "数据来源：GetSystemFirmwareTable (RSMB Type 17) • 序列号默认脱敏", -1.0, bot_h, s, null)) {
+    if (widgets.beginCard(
+        "##mem_dimm_table",
+        i18n.tr("SMBIOS 物理内存插槽明细", "SMBIOS Physical Memory DIMMs", "SMBIOS 物理メモリスロット詳細"),
+        i18n.tr("数据来源：SMBIOS Type 17 • 序列号默认脱敏", "Source: SMBIOS Type 17 • Serials masked by default", "取得元：SMBIOS Type 17 • シリアル番号マスク済"),
+        -1.0,
+        bot_h,
+        s,
+        null,
+    )) {
         if (tel.has_system_sample and tel.system.smbios_info.dimm_count > 0) {
             if (zgui.beginTable("##dimms", .{
                 .column = 7,
                 .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
             })) {
-                zgui.tableSetupColumn("插槽", .{});
-                zgui.tableSetupColumn("类型", .{});
-                zgui.tableSetupColumn("容量", .{});
-                zgui.tableSetupColumn("运行频率", .{});
-                zgui.tableSetupColumn("厂商", .{});
-                zgui.tableSetupColumn("型号", .{});
-                zgui.tableSetupColumn("序列号 (脱敏)", .{});
+                zgui.tableSetupColumn(i18n.tr("插槽", "Slot", "スロット"), .{});
+                zgui.tableSetupColumn(i18n.tr("类型", "Type", "種類"), .{});
+                zgui.tableSetupColumn(i18n.tr("容量", "Capacity", "容量"), .{});
+                zgui.tableSetupColumn(i18n.tr("运行频率", "Speed", "動作速度"), .{});
+                zgui.tableSetupColumn(i18n.tr("厂商", "Vendor", "メーカー"), .{});
+                zgui.tableSetupColumn(i18n.tr("型号", "Part Number", "型番"), .{});
+                zgui.tableSetupColumn(i18n.tr("序列号 (脱敏)", "Serial (Masked)", "シリアル (マスク)"), .{});
                 zgui.tableHeadersRow();
 
                 for (tel.system.smbios_info.dimms[0..tel.system.smbios_info.dimm_count]) |d| {
@@ -553,7 +744,7 @@ fn renderMemoryView(state: *AppState, tel: *const SharedTelemetry) void {
                     const spd = d.effectiveSpeedMhz();
                     if (spd > 0) zgui.text("{d} MHz", .{spd}) else zgui.textColored(p.text_muted, "N/A", .{});
                     _ = zgui.tableNextColumn();
-                    zgui.text("{s}", .{if (d.manufacturer_len > 0) d.manufacturerSlice() else "未知"});
+                    zgui.text("{s}", .{if (d.manufacturer_len > 0) d.manufacturerSlice() else i18n.trSlice("未知", "Unknown", "不明")});
                     _ = zgui.tableNextColumn();
                     zgui.text("{s}", .{if (d.part_number_len > 0) d.partNumberSlice() else "N/A"});
                     _ = zgui.tableNextColumn();
@@ -562,7 +753,11 @@ fn renderMemoryView(state: *AppState, tel: *const SharedTelemetry) void {
                 zgui.endTable();
             }
         } else {
-            zgui.textColored(p.text_muted, "当前 SMBIOS 表未返回有效内存条记录（常见于部分虚拟机或受限固件）。", .{});
+            zgui.textColored(p.text_muted, "{s}", .{i18n.tr(
+                "当前 SMBIOS 表未返回有效内存条记录（常见于部分虚拟机或受限固件）。",
+                "No valid DIMM entries returned by SMBIOS (common on VMs or restricted firmware).",
+                "SMBIOS テーブルに有効なメモリ情報がありません（仮想環境等で一般的）。",
+            )});
         }
     }
     widgets.endCard();
@@ -576,70 +771,100 @@ fn renderMotherboardView(state: *AppState, tel: *const SharedTelemetry) void {
     const top_h = 212.0 * s;
     const bot_h = @max(220.0 * s, avail_h - top_h - gap);
 
-    if (widgets.beginCard("##mb_smbios_card", "主板与系统基本信息", "数据来源：SMBIOS Type 2 与 GetTickCount64（用户态）", -1.0, top_h, s, null)) {
+    if (widgets.beginCard(
+        "##mb_smbios_card",
+        i18n.tr("主板与系统基本信息", "Motherboard & System Info", "マザーボード・システム基本情報"),
+        i18n.tr("数据来源：SMBIOS Type 2 与系统正常运行时间（用户态）", "Source: SMBIOS Type 2 & OS Uptime (user mode)", "取得元：SMBIOS Type 2・システム稼働時間"),
+        -1.0,
+        top_h,
+        s,
+        null,
+    )) {
         if (tel.has_system_sample and tel.system.smbios_info.available) {
             const sb = &tel.system.smbios_info;
-            widgets.drawKeyValueLine("主板厂商", if (sb.board_manufacturer_len > 0) sb.boardManufacturer() else "N/A");
-            widgets.drawKeyValueLine("主板型号", if (sb.board_product_len > 0) sb.boardProduct() else "N/A");
-            var vb: [96]u8 = undefined;
+            widgets.drawKeyValueLine(i18n.tr("主板厂商", "Manufacturer", "メーカー"), if (sb.board_manufacturer_len > 0) sb.boardManufacturer() else "N/A");
+            widgets.drawKeyValueLine(i18n.tr("主板型号", "Model", "製品名"), if (sb.board_product_len > 0) sb.boardProduct() else "N/A");
+            var vb: [128]u8 = undefined;
             var up_buf: [64]u8 = undefined;
             const up_txt = formatUptime(tel.system.uptime_seconds, &up_buf);
-            const vs = std.fmt.bufPrint(&vb, "{s}   •   SMBIOS {d}.{d}   •   系统已开机 {s}", .{
+            const vs = std.fmt.bufPrint(&vb, "{s}   •   SMBIOS {d}.{d}   •   {s} {s}", .{
                 if (sb.board_version_len > 0) sb.boardVersion() else "N/A",
                 sb.major_version,
                 sb.minor_version,
+                i18n.trSlice("系统已开机", "Uptime", "稼働時間"),
                 up_txt,
             }) catch "N/A";
-            widgets.drawKeyValueLine("版本与开机时长", vs);
+            widgets.drawKeyValueLine(i18n.tr("版本与开机时长", "Version & Uptime", "バージョン・稼働時間"), vs);
 
             var io_buf: [160]u8 = undefined;
-            const io_str = std.fmt.bufPrint(&io_buf, "磁盘读 {d:.1} MB/s  •  写 {d:.1} MB/s  •  {d:.0} IOPS", .{
+            const io_str = std.fmt.bufPrint(&io_buf, "{s} {d:.1} MB/s  •  {s} {d:.1} MB/s  •  {d:.0} IOPS", .{
+                i18n.trSlice("磁盘读", "Read", "読込"),
                 tel.system.disk_read_mbs orelse 0.0,
+                i18n.trSlice("写", "Write", "書込"),
                 tel.system.disk_write_mbs orelse 0.0,
                 tel.system.disk_iops orelse 0.0,
             }) catch "N/A";
-            widgets.drawKeyValueLine("存储实时吞吐", io_str);
+            widgets.drawKeyValueLine(i18n.tr("存储实时吞吐", "Live Storage I/O", "ストレージ I/O"), io_str);
 
-            var bat_buf: [96]u8 = undefined;
+            var bat_buf: [128]u8 = undefined;
             const bat_str = if (tel.system.battery.has_battery)
-                std.fmt.bufPrint(&bat_buf, "{s}  •  电量 {d}%", .{
-                    if (tel.system.battery.ac_online) "交流供电/充电" else "电池放电",
+                std.fmt.bufPrint(&bat_buf, "{s}  •  {s} {d}%", .{
+                    if (tel.system.battery.ac_online)
+                        i18n.trSlice("交流供电/充电", "AC Power / Charging", "AC電源 / 充電中")
+                    else
+                        i18n.trSlice("电池放电", "On Battery", "バッテリー駆動"),
+                    i18n.trSlice("电量", "Charge", "残量"),
                     tel.system.battery.charge_pct orelse 0,
-                }) catch "电池在线"
+                }) catch "Battery"
             else
-                "台式机 / 无内置电池（交流供电）";
-            widgets.drawKeyValueLine("电源与电池", bat_str);
+                i18n.trSlice("台式机 / 无内置电池（交流供电）", "Desktop / No Battery (AC Power)", "デスクトップ / バッテリーなし（AC電源）");
+            widgets.drawKeyValueLine(i18n.tr("电源与电池", "Power & Battery", "電源・バッテリー"), bat_str);
         } else {
-            zgui.textColored(p.text_muted, "正在读取 SMBIOS 主板信息...", .{});
+            zgui.textColored(p.text_muted, "{s}", .{i18n.tr("正在读取 SMBIOS 主板信息...", "Reading SMBIOS board info...", "SMBIOS マザーボード情報取得中...")});
         }
     }
     widgets.endCard();
 
     zgui.dummy(.{ .w = 0, .h = gap });
 
-    if (widgets.beginCard("##mb_info_card", "主板 Super I/O 与扩展传感器", "保留厂商原始传感器名称，不强行归类（通过独立 MPL-2.0 辅助进程提供）", -1.0, bot_h, s, null)) {
+    if (widgets.beginCard(
+        "##mb_info_card",
+        i18n.tr("主板 Super I/O 与扩展传感器", "Motherboard Super I/O & Extension Sensors", "マザーボード Super I/O・拡張センサー"),
+        i18n.tr("保留厂商原始传感器名称，不强行归类（通过独立 MPL-2.0 辅助进程提供）", "Preserves raw hardware sensor names (isolated MPL-2.0 helper)", "メーカー固有のセンサー名をそのまま表示（独立 MPL-2.0 ヘルパー）"),
+        -1.0,
+        bot_h,
+        s,
+        null,
+    )) {
         if (tel.extension.connected) {
             widgets.drawStatusPill(
-                if (tel.extension.helper_is_admin) "扩展组件已连接（管理员权限）" else "扩展组件已连接（普通权限，部分传感器受限）",
+                if (tel.extension.helper_is_admin)
+                    i18n.tr("扩展组件已连接（管理员权限）", "Extension Connected (Admin)", "拡張機能接続済（管理者権限）")
+                else
+                    i18n.tr("扩展组件已连接（普通权限，部分传感器受限）", "Extension Connected (Limited Privilege)", "拡張機能接続済（標準権限・一部制限）"),
                 if (tel.extension.helper_is_admin) p.status_ok else p.status_caution,
                 s,
             );
             zgui.sameLine(.{});
-            if (zgui.button("停止辅助进程", .{})) {
+            if (zgui.button(i18n.tr("停止辅助进程", "Stop Helper", "ヘルパー停止"), .{})) {
                 state.request_stop_lhm_helper = true;
             }
             zgui.dummy(.{ .w = 0, .h = 6.0 * s });
 
             if (tel.extension.sensor_count == 0) {
-                zgui.textWrapped("扩展辅助进程已连接，但当前未读到可用传感器。请确认以管理员身份启动辅助进程，并在 Windows 11 内存完整性环境下按文档安装受信任的 PawnIO 驱动。", .{});
+                zgui.textWrapped("{s}", .{i18n.tr(
+                    "扩展辅助进程已连接，但当前未读到可用传感器。请确认以管理员身份启动辅助进程，并在 Windows 11 内存完整性环境下按文档安装受信任的 PawnIO 驱动。",
+                    "Helper connected, but no sensors were reported. Ensure the helper runs as Administrator (and PawnIO is installed if Win11 Core Isolation is active).",
+                    "ヘルパーは接続されていますがセンサーが取得できません。管理者権限での起動や Win11 コア分離環境での PawnIO 設定を確認してください。",
+                )});
             } else if (zgui.beginTable("##lhm_sensors_tbl", .{
                 .column = 4,
                 .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
             })) {
-                zgui.tableSetupColumn("硬件设备", .{ .init_width_or_height = 1.4 });
-                zgui.tableSetupColumn("原始传感器名", .{ .init_width_or_height = 1.4 });
-                zgui.tableSetupColumn("类型", .{ .init_width_or_height = 0.8 });
-                zgui.tableSetupColumn("实时数值", .{ .init_width_or_height = 0.8 });
+                zgui.tableSetupColumn(i18n.tr("硬件设备", "Hardware", "ハードウェア"), .{ .init_width_or_height = 1.4 });
+                zgui.tableSetupColumn(i18n.tr("原始传感器名", "Raw Sensor Name", "センサー名"), .{ .init_width_or_height = 1.4 });
+                zgui.tableSetupColumn(i18n.tr("类型", "Type", "種別"), .{ .init_width_or_height = 0.8 });
+                zgui.tableSetupColumn(i18n.tr("实时数值", "Value", "現在値"), .{ .init_width_or_height = 0.8 });
                 zgui.tableHeadersRow();
 
                 for (tel.extension.sensors[0..tel.extension.sensor_count]) |item| {
@@ -657,12 +882,15 @@ fn renderMotherboardView(state: *AppState, tel: *const SharedTelemetry) void {
             }
         } else {
             widgets.drawStatusPill(
-                if (state.extension_enabled) "等待扩展辅助进程连接" else "扩展组件未启用（默认关闭）",
+                if (state.extension_enabled)
+                    i18n.tr("等待扩展辅助进程连接", "Waiting for Helper Connection", "拡張ヘルパー接続待機中")
+                else
+                    i18n.tr("扩展组件未启用（默认关闭）", "Extension Disabled (Default)", "拡張機能オフ（初期設定）"),
                 p.status_caution,
                 s,
             );
             zgui.sameLine(.{});
-            if (zgui.button("启动扩展辅助进程 (需管理员)", .{})) {
+            if (zgui.button(i18n.tr("启动扩展辅助进程 (需管理员)", "Launch Helper (Admin)", "拡張ヘルパー起動 (管理者)"), .{})) {
                 state.request_launch_lhm_helper = true;
             }
             if (state.lhm_action_msg.len > 0) {
@@ -670,10 +898,18 @@ fn renderMotherboardView(state: *AppState, tel: *const SharedTelemetry) void {
                 zgui.textColored(p.accent_blue, "{s}", .{state.lhm_action_msg});
             }
             zgui.dummy(.{ .w = 0, .h = 10.0 * s });
-            zgui.textWrapped("CPU 封装温度/功耗、主板芯片组温度、VRM 温度、机箱风扇转速与电压需要内核级硬件访问。按照规范 §1.2，主程序本体（Apache-2.0）坚持零内核驱动。", .{});
+            zgui.textWrapped("{s}", .{i18n.tr(
+                "CPU 封装温度/功耗、主板芯片组温度、VRM 温度、机箱风扇转速与电压需要内核级硬件访问。按照规范 §1.2，主程序本体（Apache-2.0）坚持零内核驱动。",
+                "CPU package temp/power, motherboard VRM, case fans, and voltages require kernel-level access. Per spec §1.2, the core app (Apache-2.0) ships zero kernel drivers.",
+                "CPU パッケージ温度/電力・VRM・ファン・電圧の取得にはカーネルアクセスが必要です。本体（Apache-2.0）はカーネルドライバ非搭載です。",
+            )});
             zgui.dummy(.{ .w = 0, .h = 4.0 * s });
             zgui.pushStyleColor4f(.{ .idx = .text, .c = p.text_secondary });
-            zgui.textWrapped("点击上方按钮将显式按需启动独立隔离的 WinHardwareMonitor.LhmHelper.exe（MPL-2.0，仅只读、零网络、同用户命名管道通信）；不自动静默安装第三方驱动。", .{});
+            zgui.textWrapped("{s}", .{i18n.tr(
+                "点击上方按钮将显式按需启动独立隔离的 WinHardwareMonitor.LhmHelper.exe（MPL-2.0，仅只读、零网络、同用户命名管道通信）；不自动静默安装第三方驱动。",
+                "Clicking above launches the isolated WinHardwareMonitor.LhmHelper.exe on demand (MPL-2.0, read-only, zero network, same-user Named Pipe).",
+                "上のボタンで独立分離された WinHardwareMonitor.LhmHelper.exe（MPL-2.0・読取専用・通信ゼロ）をオンデマンド起動します。",
+            )});
             zgui.popStyleColor(.{ .count = 1 });
         }
     }
@@ -689,11 +925,19 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
     const top_h = @min(220.0 * s, @max(175.0 * s, avail_h * 0.32));
     const bot_h = @max(300.0 * s, avail_h - top_h - gap);
 
-    if (widgets.beginCard("##disks_card", "物理磁盘列表与健康状态", "点击任意磁盘查看下方完整 SMART 详情 • 休眠磁盘默认不唤醒", -1.0, top_h, s, null)) {
+    if (widgets.beginCard(
+        "##disks_card",
+        i18n.tr("物理磁盘列表与健康状态", "Physical Disks & Health Status", "物理ディスク一覧・健康状態"),
+        i18n.tr("点击任意磁盘查看下方完整 SMART 详情 • 休眠磁盘默认不唤醒", "Click any drive for full SMART details • Sleeping drives are never woken by default", "ディスク選択で詳細 SMART 表示 • スリープ中ドライブは自動保護"),
+        -1.0,
+        top_h,
+        s,
+        null,
+    )) {
         if (!tel.has_disk_inventory) {
-            widgets.drawStatusPill("正在枚举物理磁盘与 SMART...", p.accent_blue, s);
+            widgets.drawStatusPill(i18n.tr("正在枚举物理磁盘与 SMART...", "Enumerating physical disks & SMART...", "物理ディスク・SMART をスキャン中..."), p.accent_blue, s);
         } else if (tel.disk_count == 0) {
-            widgets.drawStatusPill("未发现物理磁盘", p.status_unknown, s);
+            widgets.drawStatusPill(i18n.tr("未发现物理磁盘", "No physical disks found", "物理ディスクが見つかりません"), p.status_unknown, s);
         } else {
             if (state.selected_disk_idx >= tel.disk_count) state.selected_disk_idx = 0;
 
@@ -701,14 +945,14 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
                 .column = 8,
                 .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
             })) {
-                zgui.tableSetupColumn("设备", .{});
-                zgui.tableSetupColumn("型号", .{ .init_width_or_height = 1.8 });
-                zgui.tableSetupColumn("接口", .{});
-                zgui.tableSetupColumn("容量", .{});
-                zgui.tableSetupColumn("温度", .{});
-                zgui.tableSetupColumn("健康状态", .{});
-                zgui.tableSetupColumn("通电时间", .{});
-                zgui.tableSetupColumn("操作", .{});
+                zgui.tableSetupColumn(i18n.tr("设备", "Drive", "デバイス"), .{});
+                zgui.tableSetupColumn(i18n.tr("型号", "Model", "モデル"), .{ .init_width_or_height = 1.8 });
+                zgui.tableSetupColumn(i18n.tr("接口", "Bus", "接続"), .{});
+                zgui.tableSetupColumn(i18n.tr("容量", "Capacity", "容量"), .{});
+                zgui.tableSetupColumn(i18n.tr("温度", "Temp", "温度"), .{});
+                zgui.tableSetupColumn(i18n.tr("健康状态", "Health", "健康状態"), .{});
+                zgui.tableSetupColumn(i18n.tr("通电时间", "Power-On", "使用時間"), .{});
+                zgui.tableSetupColumn(i18n.tr("操作", "Action", "操作"), .{});
                 zgui.tableHeadersRow();
 
                 for (tel.disk_states[0..tel.disk_count], 0..) |ds, idx| {
@@ -754,11 +998,14 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
                     }
 
                     _ = zgui.tableNextColumn();
-                    var btn_buf: [32]u8 = undefined;
+                    var btn_buf: [48]u8 = undefined;
                     const btn_lbl = std.fmt.bufPrintZ(&btn_buf, "{s}##sel_disk_{d}", .{
-                        if (state.selected_disk_idx == idx) "查看中" else "详情",
+                        if (state.selected_disk_idx == idx)
+                            i18n.trSlice("查看中", "Selected", "選択中")
+                        else
+                            i18n.trSlice("详情", "Details", "詳細"),
                         idx,
-                    }) catch "详情";
+                    }) catch "Details";
                     if (zgui.button(btn_lbl, .{})) {
                         state.selected_disk_idx = idx;
                     }
@@ -778,16 +1025,29 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
     var model_buf: [160]u8 = undefined;
     const model_str = d.modelDisplay(&model_buf);
     var title_buf: [200]u8 = undefined;
-    const detail_title = std.fmt.bufPrintZ(&title_buf, "磁盘详情：Disk {d} — {s}", .{ d.drive_index, model_str }) catch "磁盘详情";
+    const detail_title = std.fmt.bufPrintZ(&title_buf, "{s}: Disk {d} — {s}", .{
+        i18n.trSlice("磁盘详情", "Disk Details", "ディスク詳細"),
+        d.drive_index,
+        model_str,
+    }) catch "Disk Details";
 
-    if (widgets.beginCard("##disk_detail_card", detail_title, "SMART 正常不代表硬盘不会突然损坏，请定期做好重要数据备份", -1.0, bot_h, s, null)) {
-        var meta1: [240]u8 = undefined;
-        const m1 = std.fmt.bufPrint(&meta1, "接口 {s}   •   固件 {s}   •   序列号 {s}   •   稳定 ID {s}{s}   •   {s}", .{
+    if (widgets.beginCard(
+        "##disk_detail_card",
+        detail_title,
+        i18n.tr("SMART 正常不代表硬盘不会突然损坏，请定期做好重要数据备份", "Normal SMART does not guarantee immunity from sudden failure; back up regularly", "SMART 正常でも突然故障する可能性があります。定期的なバックアップを推奨します"),
+        -1.0,
+        bot_h,
+        s,
+        null,
+    )) {
+        var meta1: [256]u8 = undefined;
+        const m1 = std.fmt.bufPrint(&meta1, "{s}: {s}   •   FW: {s}   •   SN: {s}   •   ID: {s}{s}   •   {s}", .{
+            i18n.trSlice("接口", "Bus", "接続"),
             d.bus_type.name(),
             d.firmwareSlice(),
             d.serialMaskedSlice(),
             d.stable_id.slice(),
-            if (d.stable_id.is_stable) "" else " (不稳定)",
+            if (d.stable_id.is_stable) "" else i18n.trSlice(" (不稳定)", " (unstable)", " (不安定)"),
             d.support.labelZh(),
         }) catch "";
         zgui.pushStyleColor4f(.{ .idx = .text, .c = p.text_secondary });
@@ -798,19 +1058,23 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
         widgets.drawStatusPill(ds.assessment.overall.labelZh(), p.healthColor(ds.assessment.overall), s);
         zgui.sameLine(.{});
         if (ds.nvme.wctemp_c) |wc| {
-            zgui.textColored(p.text_secondary, "设备温度阈值：警告 {d}°C / 临界 {d}°C", .{ wc, ds.nvme.cctemp_c orelse 0 });
+            zgui.textColored(p.text_secondary, "{s}: {d}°C / {d}°C", .{
+                i18n.tr("设备温度阈值 (警/危)", "Device Temp Limits (Warn/Crit)", "デバイス温度閾値 (警告/危険)"),
+                wc,
+                ds.nvme.cctemp_c orelse 0,
+            });
             zgui.sameLine(.{ .spacing = 16.0 * s });
         }
         if (ds.baseline.initialized) {
-            if (zgui.button("以当前值重设基线", .{})) {
+            if (zgui.button(i18n.tr("以当前值重设基线", "Reset Baseline", "基準値リセット"), .{})) {
                 state.request_reset_baseline_idx = state.selected_disk_idx;
             }
         }
         if (ds.ata.status == .ok) {
             zgui.sameLine(.{ .spacing = 12.0 * s });
-            _ = zgui.checkbox("确认下发自检", .{ .v = &state.bench_smart_confirmed });
+            _ = zgui.checkbox(i18n.tr("确认下发自检", "Confirm Self-Test", "セルフテスト確認"), .{ .v = &state.bench_smart_confirmed });
             zgui.sameLine(.{ .spacing = 6.0 * s });
-            if (zgui.button("执行 SMART 短自检 (~2分)", .{})) {
+            if (zgui.button(i18n.tr("执行 SMART 短自检 (~2分)", "Run SMART Short Self-Test (~2m)", "SMART ショートテスト (~2分)"), .{})) {
                 state.request_ata_short_selftest_idx = state.selected_disk_idx;
             }
         }
@@ -826,7 +1090,11 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
                 zgui.popStyleColor(.{ .count = 1 });
             }
         } else if (ds.assessment.overall == .normal) {
-            zgui.textColored(p.status_ok, "全部已检测健康规则均正常（无 Critical Warning / 介质错误 / 扇区重映射异常）。", .{});
+            zgui.textColored(p.status_ok, "{s}", .{i18n.tr(
+                "全部已检测健康规则均正常（无 Critical Warning / 介质错误 / 扇区重映射异常）。",
+                "All evaluated §2.5.5 health rules are normal (no Critical Warning, media errors, or sector reallocation issues).",
+                "すべての健康判定ルールは正常です（致命的警告・メディアエラー・代替セクタ異常なし）。",
+            )});
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
@@ -843,15 +1111,45 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
             widgets.drawStatusPill(st.labelZh(), p.sensorStatusColor(st), s);
             zgui.dummy(.{ .w = 0, .h = 6.0 * s });
             if (d.support.isUnsupported()) {
-                zgui.textWrapped("该设备属于“{s}”，Windows 标准存储接口无法直读底层 SMART，因此健康状态标注为“未知”。", .{d.support.labelZh()});
+                zgui.textWrapped("{s}: {s}", .{
+                    i18n.tr("该设备不支持标准直读 SMART，健康状态标注为“未知”", "Direct SMART read unsupported; health is marked Unknown", "標準 SMART 直読非対応のため健康状態は「不明」と表示します"),
+                    d.support.labelZh(),
+                });
             } else if (d.removable and d.bus_type == .usb) {
-                zgui.textWrapped("该设备为可移动 USB 存储（普通 U 盘主控固件通常不提供 SMART 健康统计，状态码={s} / 错误码={d}）；规范严禁编造健康度或发送 USB 桥接厂商私有命令。", .{ st.labelZh(), err orelse 0 });
+                zgui.textWrapped("{s} ({s}, err={d})", .{
+                    i18n.tr(
+                        "可移动 USB 存储通常不提供 SMART 统计；规范严禁编造健康度或发送桥接厂商私有命令",
+                        "Removable USB flash drives usually lack SMART; vendor-proprietary bridge commands are strictly forbidden",
+                        "リムーバブル USB メモリは通常 SMART 非対応です（独自コマンド送信は禁止）",
+                    ),
+                    st.labelZh(),
+                    err orelse 0,
+                });
             } else if (st == .access_denied) {
-                zgui.textWrapped("读取该磁盘的 ATA/SAT SMART 需要以读写权限打开物理设备句柄（Win32 错误码 {d} = ERROR_ACCESS_DENIED）。请点击左侧“以管理员身份重启”后再查看。", .{err orelse 5});
+                zgui.textWrapped("{s} (err={d})", .{
+                    i18n.tr(
+                        "读取 ATA/SAT SMART 需要管理员权限，请点击左侧“以管理员身份重启”后再查看",
+                        "Reading ATA/SAT SMART requires Administrator privileges; click 'Restart as Admin' on the left",
+                        "ATA/SAT SMART の読取には管理者権限が必要です。左側の「管理者として再起動」を押してください",
+                    ),
+                    err orelse 5,
+                });
             } else if (st == .device_standby) {
-                zgui.textWrapped("该磁盘当前处于休眠/待机状态，已按规范 §2.5.4 跳过 SMART 读取以避免唤醒增加磨损。", .{});
+                zgui.textWrapped("{s}", .{i18n.tr(
+                    "该磁盘当前处于休眠/待机状态，已按规范 §2.5.4 跳过 SMART 读取以避免唤醒增加磨损。",
+                    "Drive is currently in standby/sleep; SMART polling skipped per §2.5.4 to avoid waking it.",
+                    "このディスクはスリープ/待機状態のため、摩耗防止のため SMART 取得をスキップしました。",
+                )});
             } else {
-                zgui.textWrapped("当前无法读取该磁盘的 SMART 属性（状态：{s}，错误码：{d}）。USB 外接盒受桥接芯片固件限制，V1 严禁发送厂商私有命令。", .{ st.labelZh(), err orelse 0 });
+                zgui.textWrapped("{s} ({s}, err={d})", .{
+                    i18n.tr(
+                        "当前无法读取该磁盘的 SMART 属性（受接口或桥接固件限制，严禁发送厂商私有命令）",
+                        "Unable to read SMART from this drive (bus/bridge firmware limit; no proprietary commands sent)",
+                        "このディスクの SMART を取得できません（インターフェースまたはブリッジ制限）",
+                    ),
+                    st.labelZh(),
+                    err orelse 0,
+                });
             }
         }
     }
@@ -863,30 +1161,38 @@ fn renderNvmeSmartTable(nv: *const @import("../collectors/storage/nvme_smart.zig
         .column = 3,
         .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
     })) {
-        zgui.tableSetupColumn("NVMe SMART 指标", .{ .init_width_or_height = 1.1 });
-        zgui.tableSetupColumn("当前值", .{ .init_width_or_height = 0.9 });
-        zgui.tableSetupColumn("说明", .{ .init_width_or_height = 1.6 });
+        zgui.tableSetupColumn(i18n.tr("NVMe SMART 指标", "NVMe SMART Metric", "NVMe SMART 指標"), .{ .init_width_or_height = 1.1 });
+        zgui.tableSetupColumn(i18n.tr("当前值", "Value", "現在値"), .{ .init_width_or_height = 0.9 });
+        zgui.tableSetupColumn(i18n.tr("说明", "Description", "説明"), .{ .init_width_or_height = 1.6 });
         zgui.tableHeadersRow();
 
-        nvmeRow("Critical Warning", "0x{X:0>2}", .{nv.critical_warning}, if (nv.critical_warning == 0) "无严重硬件健康警告" else "存在严重警告位，请查看上方规则证据");
+        nvmeRow(
+            "Critical Warning",
+            "0x{X:0>2}",
+            .{nv.critical_warning},
+            if (nv.critical_warning == 0)
+                i18n.tr("无严重硬件健康警告", "No critical hardware warnings", "致命的な警告なし")
+            else
+                i18n.tr("存在严重警告位，请查看上方规则证据", "Critical warning bits set — check rule hits above", "警告ビットあり（上のルール結果を確認）"),
+        );
         if (nv.composite_temp_c) |tc| {
-            nvmeRow("Composite Temperature", "{d:.0}{s} ({d} K)", .{ unit.convert(@floatFromInt(tc)), unit.symbol(), nv.composite_temp_k }, "综合温度");
+            nvmeRow("Composite Temperature", "{d:.0}{s} ({d} K)", .{ unit.convert(@floatFromInt(tc)), unit.symbol(), nv.composite_temp_k }, i18n.tr("综合温度", "Composite temperature", "総合温度"));
         }
-        nvmeRow("Available Spare / Threshold", "{d}% / {d}%", .{ nv.available_spare, nv.available_spare_threshold }, "可用备用块比例及设备阈值");
-        nvmeRow("Percentage Used", "{d}%", .{nv.percentage_used}, "厂商寿命消耗估计（非精确剩余寿命，可超 100%）");
-        nvmeRow("累计读取量 (Data Units Read)", "{d:.2} TB ({d} units)", .{ nv.bytesReadTB(), nv.data_units_read }, "128 位计数，1 unit = 512,000 字节");
-        nvmeRow("累计写入量 (Data Units Written)", "{d:.2} TB ({d} units)", .{ nv.bytesWrittenTB(), nv.data_units_written }, "128 位计数，1 unit = 512,000 字节");
-        nvmeRow("累计通电时间 (Power On Hours)", "{d} 小时", .{nv.power_on_hours}, "控制器累计通电运行时间");
-        nvmeRow("通电次数 (Power Cycles)", "{d} 次", .{nv.power_cycles}, "累计通电循环次数");
-        nvmeRow("非正常关机 (Unsafe Shutdowns)", "{d} 次", .{nv.unsafe_shutdowns}, "未收到正常关机通知的断电次数");
-        nvmeRow("介质及数据完整性错误", "{d}", .{nv.media_errors}, "不可恢复 ECC/CRC 完整性错误计数");
-        nvmeRow("错误日志条目 (Error Log Entries)", "{d}", .{nv.error_log_entries}, "历史错误日志总条数");
-        nvmeRow("高温累计时间 (Warn / Crit)", "{d} 分 / {d} 分", .{ nv.warning_temp_time_min, nv.critical_temp_time_min }, "超过警告/临界温度的累计时间");
+        nvmeRow("Available Spare / Threshold", "{d}% / {d}%", .{ nv.available_spare, nv.available_spare_threshold }, i18n.tr("可用备用块比例及设备阈值", "Available spare & threshold", "予備領域と閾値"));
+        nvmeRow("Percentage Used", "{d}%", .{nv.percentage_used}, i18n.tr("厂商寿命消耗估计（非精确剩余寿命，可超 100%）", "Vendor endurance estimate (may exceed 100%)", "メーカー推定寿命消費率（100%超過可）"));
+        nvmeRow(i18n.tr("累计读取量 (Data Units Read)", "Data Units Read", "総読込量 (Data Units Read)"), "{d:.2} TB ({d})", .{ nv.bytesReadTB(), nv.data_units_read }, i18n.tr("128 位计数，1 unit = 512,000 字节", "128-bit counter (1 unit = 512,000 bytes)", "128ビットカウンタ（1 unit = 512,000 B）"));
+        nvmeRow(i18n.tr("累计写入量 (Data Units Written)", "Data Units Written", "総書込量 (Data Units Written)"), "{d:.2} TB ({d})", .{ nv.bytesWrittenTB(), nv.data_units_written }, i18n.tr("128 位计数，1 unit = 512,000 字节", "128-bit counter (1 unit = 512,000 bytes)", "128ビットカウンタ（1 unit = 512,000 B）"));
+        nvmeRow(i18n.tr("累计通电时间 (Power On Hours)", "Power On Hours", "使用時間 (Power On Hours)"), "{d} h", .{nv.power_on_hours}, i18n.tr("控制器累计通电运行时间", "Cumulative powered-on hours", "累計通電時間"));
+        nvmeRow(i18n.tr("通电次数 (Power Cycles)", "Power Cycles", "電源投入回数 (Power Cycles)"), "{d}", .{nv.power_cycles}, i18n.tr("累计通电循环次数", "Total power cycles", "累計電源サイクル数"));
+        nvmeRow(i18n.tr("非正常关机 (Unsafe Shutdowns)", "Unsafe Shutdowns", "異常終了回数 (Unsafe Shutdowns)"), "{d}", .{nv.unsafe_shutdowns}, i18n.tr("未收到正常关机通知的断电次数", "Power losses without clean shutdown", "正常シャットダウンなしの電源断回数"));
+        nvmeRow(i18n.tr("介质及数据完整性错误", "Media & Data Integrity Errors", "メディア・データ整合性エラー"), "{d}", .{nv.media_errors}, i18n.tr("不可恢复 ECC/CRC 完整性错误计数", "Unrecovered ECC/CRC errors", "回復不能 ECC/CRC エラー数"));
+        nvmeRow(i18n.tr("错误日志条目", "Error Log Entries", "エラーログ件数"), "{d}", .{nv.error_log_entries}, i18n.tr("历史错误日志总条数", "Total error information log entries", "累計エラーログ件数"));
+        nvmeRow(i18n.tr("高温累计时间 (Warn / Crit)", "Thermal Time (Warn / Crit)", "高温累計時間 (警告 / 危険)"), "{d}m / {d}m", .{ nv.warning_temp_time_min, nv.critical_temp_time_min }, i18n.tr("超过警告/临界温度的累计时间", "Minutes above warning / critical temp", "警告・危険温度超過の累計時間"));
         for (nv.temp_sensors_c, 0..) |ts_opt, ti| {
             if (ts_opt) |ts| {
-                var lbl_b: [32]u8 = undefined;
-                const lbl = std.fmt.bufPrintZ(&lbl_b, "温度传感器 #{d}", .{ti + 1}) catch "温度传感器";
-                nvmeRow(lbl, "{d:.0}{s}", .{ unit.convert(@floatFromInt(ts)), unit.symbol() }, "NVMe 控制器附加温度探头");
+                var lbl_b: [48]u8 = undefined;
+                const lbl = std.fmt.bufPrintZ(&lbl_b, "{s} #{d}", .{ i18n.trSlice("温度传感器", "Temp Sensor", "温度センサー"), ti + 1 }) catch "Sensor";
+                nvmeRow(lbl, "{d:.0}{s}", .{ unit.convert(@floatFromInt(ts)), unit.symbol() }, i18n.tr("NVMe 控制器附加温度探头", "Auxiliary NVMe thermal sensor", "NVMe コントローラ補助温度センサー"));
             }
         }
 
@@ -913,12 +1219,12 @@ fn renderAtaSmartTable(ad: *const @import("../collectors/storage/ata_smart.zig")
         .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
     })) {
         zgui.tableSetupColumn("ID", .{});
-        zgui.tableSetupColumn("属性名称", .{ .init_width_or_height = 1.4 });
-        zgui.tableSetupColumn("类型", .{});
-        zgui.tableSetupColumn("当前值", .{});
-        zgui.tableSetupColumn("最差值", .{});
-        zgui.tableSetupColumn("阈值", .{});
-        zgui.tableSetupColumn("原始值 (Hex / Dec)", .{ .init_width_or_height = 1.4 });
+        zgui.tableSetupColumn(i18n.tr("属性名称", "Attribute Name", "属性名"), .{ .init_width_or_height = 1.4 });
+        zgui.tableSetupColumn(i18n.tr("类型", "Type", "種別"), .{});
+        zgui.tableSetupColumn(i18n.tr("当前值", "Current", "現在値"), .{});
+        zgui.tableSetupColumn(i18n.tr("最差值", "Worst", "最悪値"), .{});
+        zgui.tableSetupColumn(i18n.tr("阈值", "Threshold", "閾値"), .{});
+        zgui.tableSetupColumn(i18n.tr("原始值 (Hex / Dec)", "Raw (Hex / Dec)", "生の値 (Hex / Dec)"), .{ .init_width_or_height = 1.4 });
         zgui.tableHeadersRow();
 
         for (ad.attrs[0..ad.attr_count]) |a| {
@@ -947,12 +1253,20 @@ fn renderSensorsView(state: *AppState, tel: *const SharedTelemetry) void {
     const p = theme.active();
     const avail_h = zgui.getContentRegionAvail()[1];
 
-    if (widgets.beginCard("##all_sensors_card", "全传感器实时统计表（HWiNFO 风格）", "自动累计所有活跃传感器的当前 / 最小 / 平均 / 最大值，支持一键清零与 CSV 导出", -1.0, @max(360.0 * s, avail_h), s, null)) {
-        if (zgui.button("清零最小 / 平均 / 最大统计", .{ .w = 210.0 * s, .h = 28.0 * s })) {
+    if (widgets.beginCard(
+        "##all_sensors_card",
+        i18n.tr("全传感器实时统计表（HWiNFO 风格）", "All Sensors Live Table (HWiNFO Style)", "全センサー統計表（HWiNFO 形式）"),
+        i18n.tr("自动累计所有活跃传感器的当前 / 最小 / 平均 / 最大值，支持一键清零与 CSV 导出", "Tracks Current / Min / Avg / Max for all active sensors with 1-click reset & CSV export", "全アクティブセンサーの現在/最小/平均/最大を自動集計（リセット・CSV出力対応）"),
+        -1.0,
+        @max(360.0 * s, avail_h),
+        s,
+        null,
+    )) {
+        if (zgui.button(i18n.tr("清零最小 / 平均 / 最大统计", "Reset Min / Avg / Max", "最小/平均/最大をリセット"), .{ .w = 210.0 * s, .h = 28.0 * s })) {
             state.request_reset_sensor_stats = true;
         }
         zgui.sameLine(.{});
-        if (zgui.button("导出 CSV 报表至 logs", .{ .w = 180.0 * s, .h = 28.0 * s })) {
+        if (zgui.button(i18n.tr("导出 CSV 报表至 logs", "Export CSV to logs/", "CSV レポートを logs/ に出力"), .{ .w = 195.0 * s, .h = 28.0 * s })) {
             state.request_export_sensors_csv = true;
         }
         if (state.sensors_csv_msg.len > 0) {
@@ -963,20 +1277,21 @@ fn renderSensorsView(state: *AppState, tel: *const SharedTelemetry) void {
 
         const rows = tel.sensor_stats.slice();
         if (rows.len == 0) {
-            zgui.textColored(p.text_muted, "正在等待首个传感器采样周期...", .{});
+            zgui.textColored(p.text_muted, "{s}", .{i18n.tr("正在等待首个传感器采样周期...", "Waiting for first sensor polling cycle...", "初回センサー取得サイクル待機中...")});
         } else if (zgui.beginTable("##sensors_stats_tbl", .{
             .column = 7,
             .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
         })) {
-            zgui.tableSetupColumn("分类", .{ .init_width_or_height = 0.8 });
-            zgui.tableSetupColumn("传感器名称", .{ .init_width_or_height = 1.6 });
-            zgui.tableSetupColumn("当前值", .{ .init_width_or_height = 0.8 });
-            zgui.tableSetupColumn("最小值", .{ .init_width_or_height = 0.8 });
-            zgui.tableSetupColumn("平均值", .{ .init_width_or_height = 0.8 });
-            zgui.tableSetupColumn("最大值", .{ .init_width_or_height = 0.8 });
-            zgui.tableSetupColumn("采样数", .{ .init_width_or_height = 0.6 });
+            zgui.tableSetupColumn(i18n.tr("分类", "Category", "カテゴリ"), .{ .init_width_or_height = 0.8 });
+            zgui.tableSetupColumn(i18n.tr("传感器名称", "Sensor Name", "センサー名"), .{ .init_width_or_height = 1.6 });
+            zgui.tableSetupColumn(i18n.tr("当前值", "Current", "現在値"), .{ .init_width_or_height = 0.8 });
+            zgui.tableSetupColumn(i18n.tr("最小值", "Min", "最小値"), .{ .init_width_or_height = 0.8 });
+            zgui.tableSetupColumn(i18n.tr("平均值", "Avg", "平均値"), .{ .init_width_or_height = 0.8 });
+            zgui.tableSetupColumn(i18n.tr("最大值", "Max", "最大値"), .{ .init_width_or_height = 0.8 });
+            zgui.tableSetupColumn(i18n.tr("采样数", "Samples", "サンプル"), .{ .init_width_or_height = 0.6 });
             zgui.tableHeadersRow();
 
+            var name_buf: [96]u8 = undefined;
             for (rows) |*e| {
                 const is_c = std.mem.eql(u8, e.unitSlice(), "C");
                 const disp_unit = if (is_c) state.temp_unit.symbol() else e.unitSlice();
@@ -987,9 +1302,9 @@ fn renderSensorsView(state: *AppState, tel: *const SharedTelemetry) void {
 
                 zgui.tableNextRow(.{});
                 _ = zgui.tableNextColumn();
-                zgui.textColored(p.text_muted, "{s}", .{e.categorySlice()});
+                zgui.textColored(p.text_muted, "{s}", .{e.localizedCategory()});
                 _ = zgui.tableNextColumn();
-                zgui.text("{s}", .{e.nameSlice()});
+                zgui.text("{s}", .{e.localizedName(&name_buf)});
                 _ = zgui.tableNextColumn();
                 zgui.textColored(p.accent_cyan, "{d:.1} {s}", .{ cur_v, disp_unit });
                 _ = zgui.tableNextColumn();
@@ -1016,16 +1331,28 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
     const right_w = avail[0] - left_w - gap;
     const full_h = @max(460.0 * s, avail[1]);
 
-    if (widgets.beginCard("##bench_ctrl_card", "硬件稳定性与基准测试控制台 (V2.0)", "所有主动负载均内置高温自动熔断保护；磁盘测速仅写受控临时文件，绝不写裸盘", left_w, full_h, s, null)) {
+    if (widgets.beginCard(
+        "##bench_ctrl_card",
+        i18n.tr("硬件稳定性与基准测试控制台 (V2.0)", "Hardware Stress & Benchmark Console (V2.0)", "ハードウェア安定性・ベンチマーク (V2.0)"),
+        i18n.tr("所有主动负载均内置高温自动熔断保护；磁盘测速采用无缓存受控临时文件，绝不写裸盘", "Built-in thermal auto-cutoff; disk benchmark uses unbuffered temp file (never raw disk)", "高温自動保護内蔵・ディスク計測はキャッシュ無効の一時ファイルのみ使用"),
+        left_w,
+        full_h,
+        s,
+        null,
+    )) {
         const max_threads: i32 = @intCast(@max(tel.system.logical_cores, 1));
-        _ = zgui.sliderInt("CPU 测试线程数", .{ .v = &state.bench_cpu_threads, .min = 1, .max = max_threads });
-        _ = zgui.sliderInt("烤机持续时长 (秒)", .{ .v = &state.bench_duration_s, .min = 10, .max = 300 });
-        _ = zgui.sliderInt("高温自动熔断阈值 (°C)", .{ .v = &state.bench_thermal_cutoff_c, .min = 70, .max = 100 });
-        _ = zgui.sliderInt("内存校验容量 (MB)", .{ .v = &state.bench_mem_mb, .min = 64, .max = 1024 });
-        _ = zgui.sliderInt("磁盘临时文件大小 (MB)", .{ .v = &state.bench_disk_mb, .min = 64, .max = 1024 });
+        _ = zgui.sliderInt(i18n.tr("CPU 测试线程数", "CPU Threads", "CPU スレッド数"), .{ .v = &state.bench_cpu_threads, .min = 1, .max = max_threads });
+        _ = zgui.sliderInt(i18n.tr("烤机持续时长 (秒)", "Duration (sec)", "実行時間 (秒)"), .{ .v = &state.bench_duration_s, .min = 10, .max = 300 });
+        _ = zgui.sliderInt(i18n.tr("高温自动熔断阈值 (°C)", "Thermal Cutoff (°C)", "高温自動停止閾値 (°C)"), .{ .v = &state.bench_thermal_cutoff_c, .min = 70, .max = 100 });
+        _ = zgui.sliderInt(i18n.tr("内存校验容量 (MB)", "Memory Size (MB)", "メモリ検証容量 (MB)"), .{ .v = &state.bench_mem_mb, .min = 64, .max = 1024 });
+        _ = zgui.sliderInt(i18n.tr("磁盘临时文件大小 (MB)", "Disk Temp File (MB)", "ディスク一時ファイル (MB)"), .{ .v = &state.bench_disk_mb, .min = 64, .max = 1024 });
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-        _ = zgui.checkbox("二次确认：允许在 logs 目录创建临时文件进行磁盘测速（结束后自动删除）", .{ .v = &state.bench_disk_confirmed });
+        _ = zgui.checkbox(i18n.tr(
+            "二次确认：允许在 logs 目录创建临时文件进行磁盘测速（结束后自动删除）",
+            "Confirm: allow creating a temporary benchmark file in logs/ (auto-deleted)",
+            "二次確認：logs フォルダに一時ファイルを作成してディスク計測（終了後自動削除）",
+        ), .{ .v = &state.bench_disk_confirmed });
 
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
         const running = (bench.outcome == .running);
@@ -1034,16 +1361,16 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
         zgui.pushStyleColor4f(.{ .idx = .button, .c = p.accent_blue_soft });
         zgui.pushStyleColor4f(.{ .idx = .button_hovered, .c = p.accent_blue_hover });
         zgui.pushStyleColor4f(.{ .idx = .text, .c = p.accent_blue });
-        if (zgui.button("1. 启动 CPU 算力与稳定性校验", .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("1. 启动 CPU 算力与稳定性校验", "1. Start CPU Compute & Stability Test", "1. CPU 演算・安定性テスト開始"), .{ .w = -1.0, .h = 32.0 * s })) {
             state.request_start_cpu_bench = true;
         }
-        if (zgui.button("2. 启动 4 轮内存位翻转与带宽校验 (MemTest)", .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("2. 启动 4 轮内存位翻转与带宽校验 (MemTest)", "2. Start 4-Pass Memory Verify (MemTest)", "2. 4パス メモリビット・帯域検証開始"), .{ .w = -1.0, .h = 32.0 * s })) {
             state.request_start_mem_bench = true;
         }
-        if (zgui.button("3. 启动磁盘 SEQ1M / RND4K 文件级测速", .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("3. 启动磁盘 SEQ1M / RND4K 无缓存测速", "3. Start Disk SEQ1M / RND4K Unbuffered Bench", "3. ディスク SEQ1M / RND4K 無キャッシュ計測"), .{ .w = -1.0, .h = 32.0 * s })) {
             state.request_start_disk_bench = true;
         }
-        if (zgui.button("4. 启动 GPU OpenGL 3.3 渲染烤机", .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("4. 启动 GPU OpenGL 3.3 渲染烤机", "4. Start GPU OpenGL 3.3 Stress Test", "4. GPU OpenGL 3.3 負荷テスト開始"), .{ .w = -1.0, .h = 32.0 * s })) {
             state.request_start_gpu_bench = true;
         }
         zgui.popStyleColor(.{ .count = 3 });
@@ -1052,12 +1379,12 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
         zgui.pushStyleColor4f(.{ .idx = .button, .c = .{ p.status_critical[0], p.status_critical[1], p.status_critical[2], 0.22 } });
         zgui.pushStyleColor4f(.{ .idx = .text, .c = p.status_critical });
-        if (zgui.button("立即停止当前测试", .{ .w = 160.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("立即停止当前测试", "Stop Active Test", "テストを今すぐ停止"), .{ .w = 165.0 * s, .h = 30.0 * s })) {
             state.request_stop_bench = true;
         }
         zgui.popStyleColor(.{ .count = 2 });
         zgui.sameLine(.{});
-        if (zgui.button("导出硬件测试报告", .{ .w = 160.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("导出硬件测试报告", "Export Test Report", "レポートを出力"), .{ .w = 165.0 * s, .h = 30.0 * s })) {
             state.request_export_bench_report = true;
         }
 
@@ -1070,7 +1397,15 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##bench_result_card", "实时执行进度与实测结果", "联动监控实时温度与计算校验错误数", right_w, full_h, s, null)) {
+    if (widgets.beginCard(
+        "##bench_result_card",
+        i18n.tr("实时执行进度与实测结果", "Live Progress & Measured Results", "実行状況・実測結果"),
+        i18n.tr("联动监控实时温度与计算校验错误数", "Linked to live thermal sensors & hardware error counter", "リアルタイム温度監視・演算エラーカウンタ連動"),
+        right_w,
+        full_h,
+        s,
+        null,
+    )) {
         const badge_col = switch (bench.outcome) {
             .passed => p.status_ok,
             .running => p.accent_blue,
@@ -1079,7 +1414,7 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
         };
         widgets.drawStatusPill(bench.outcome.labelZh(), badge_col, s);
         zgui.sameLine(.{ .spacing = 10.0 * s });
-        zgui.textColored(p.text_secondary, "项目：{s}", .{bench.last_kind.labelZh()});
+        zgui.textColored(p.text_secondary, "{s}: {s}", .{ i18n.tr("项目", "Test", "項目"), bench.last_kind.labelZh() });
 
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
         var prog_buf: [32]u8 = undefined;
@@ -1087,21 +1422,25 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
         zgui.progressBar(.{ .fraction = bench.progress_pct / 100.0, .w = -1.0, .h = 22.0 * s, .overlay = prog_txt });
 
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
-        var err_buf: [64]u8 = undefined;
-        const err_str = std.fmt.bufPrint(&err_buf, "{d} 个（0 = 硬件计算/位校验正常）", .{bench.error_count}) catch "0";
-        widgets.drawKeyValueLine("硬件错误计数", err_str);
+        var err_buf: [80]u8 = undefined;
+        const err_str = std.fmt.bufPrint(&err_buf, "{d} ({s})", .{
+            bench.error_count,
+            i18n.trSlice("0 = 硬件计算/位校验正常", "0 = hardware/bit verify OK", "0 = 演算/ビット検証正常"),
+        }) catch "0";
+        widgets.drawKeyValueLine(i18n.tr("硬件错误计数", "Hardware Errors", "エラー数"), err_str);
 
-        var peak_buf: [80]u8 = undefined;
+        var peak_buf: [96]u8 = undefined;
         const peak_str = if (bench.peak_temp_c) |pt|
-            std.fmt.bufPrint(&peak_buf, "{d:.1}{s}  •  熔断上限 {d:.0}{s}", .{
+            std.fmt.bufPrint(&peak_buf, "{d:.1}{s}  •  {s} {d:.0}{s}", .{
                 state.temp_unit.convert(pt),
                 state.temp_unit.symbol(),
+                i18n.trSlice("熔断上限", "Cutoff", "保護閾値"),
                 state.temp_unit.convert(bench.thermal_cutoff_c),
                 state.temp_unit.symbol(),
             }) catch "N/A"
         else
-            "N/A（建议启用 LHM 扩展或参考 GPU 温度）";
-        widgets.drawKeyValueLine("期间峰值温度", peak_str);
+            i18n.trSlice("N/A（建议启用 LHM 扩展或参考 GPU 温度）", "N/A (enable LHM extension or check GPU temp)", "N/A（LHM 拡張有効化または GPU 温度を参照）");
+        widgets.drawKeyValueLine(i18n.tr("期间峰值温度", "Peak Temp", "期間最高温度"), peak_str);
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         zgui.separator();
@@ -1109,43 +1448,50 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
 
         switch (bench.last_kind) {
             .cpu_stress => {
-                var b1: [96]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "{d} 线程  •  综合算力 {d:.2} MOPS (百万次确定性混合运算/秒)", .{ bench.cpu_threads, bench.cpu_score_mops }) catch "";
-                widgets.drawKeyValueLine("CPU 实测成绩", s1);
+                var b1: [128]u8 = undefined;
+                const s1 = std.fmt.bufPrint(&b1, "{d} {s}  •  {d:.2} MOPS", .{
+                    bench.cpu_threads,
+                    i18n.trSlice("线程", "Threads", "スレッド"),
+                    bench.cpu_score_mops,
+                }) catch "";
+                widgets.drawKeyValueLine(i18n.tr("CPU 实测成绩", "CPU Score", "CPU 実測スコア"), s1);
             },
             .memory_verify => {
-                var b1: [128]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "容量 {d} MB  •  完成 {d}/4 轮  •  写入 {d:.2} GB/s  •  回读校验 {d:.2} GB/s", .{
+                var b1: [144]u8 = undefined;
+                const s1 = std.fmt.bufPrint(&b1, "{d} MB  •  {d}/4  •  W {d:.2} GB/s  •  R+Verify {d:.2} GB/s", .{
                     bench.mem_tested_mb, bench.mem_passes_done, bench.mem_write_gbs, bench.mem_read_gbs,
                 }) catch "";
-                widgets.drawKeyValueLine("内存实测成绩", s1);
+                widgets.drawKeyValueLine(i18n.tr("内存实测成绩", "Memory Result", "メモリ実測結果"), s1);
             },
             .disk_bench => {
                 var b1: [128]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "SEQ1M 写入 {d:.1} MB/s  •  SEQ1M 读取 {d:.1} MB/s", .{ bench.disk_seq_write_mbs, bench.disk_seq_read_mbs }) catch "";
-                widgets.drawKeyValueLine("顺序吞吐", s1);
+                const s1 = std.fmt.bufPrint(&b1, "SEQ1M W {d:.1} MB/s  •  SEQ1M R {d:.1} MB/s", .{ bench.disk_seq_write_mbs, bench.disk_seq_read_mbs }) catch "";
+                widgets.drawKeyValueLine(i18n.tr("顺序吞吐", "Sequential", "シーケンシャル"), s1);
                 var b2: [128]u8 = undefined;
-                const s2 = std.fmt.bufPrint(&b2, "RND4K 读取 {d:.1} MB/s  •  {d:.0} IOPS  •  平均延迟 {d:.1} us", .{
+                const s2 = std.fmt.bufPrint(&b2, "RND4K R {d:.1} MB/s  •  {d:.0} IOPS  •  {d:.1} us", .{
                     bench.disk_rnd4k_read_mbs, bench.disk_rnd4k_read_iops, bench.disk_rnd4k_avg_lat_us,
                 }) catch "";
-                widgets.drawKeyValueLine("4K 随机读", s2);
+                widgets.drawKeyValueLine(i18n.tr("4K 随机读", "4K Random Read", "4K ランダム読込"), s2);
             },
             .gpu_stress => {
                 var b1: [96]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "累计帧数 {d}  •  平均帧率 {d:.1} FPS", .{ bench.gpu_frames, bench.gpu_avg_fps }) catch "";
-                widgets.drawKeyValueLine("GPU 渲染统计", s1);
+                const s1 = std.fmt.bufPrint(&b1, "{d} frames  •  {d:.1} FPS", .{ bench.gpu_frames, bench.gpu_avg_fps }) catch "";
+                widgets.drawKeyValueLine(i18n.tr("GPU 渲染统计", "GPU Render Stats", "GPU 描画統計"), s1);
             },
             .none => {
-                zgui.textColored(p.text_muted, "请在左侧选择测试项开始准确的硬件稳定性与性能验证。", .{});
+                zgui.textColored(p.text_muted, "{s}", .{i18n.tr(
+                    "请在左侧选择测试项开始准确的硬件稳定性与性能验证。",
+                    "Select a test on the left to start hardware stability & benchmark verification.",
+                    "左側からテスト項目を選択して安定性・性能検証を開始してください。",
+                )});
             },
         }
 
         if (bench.summary_len > 0) {
             zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-            widgets.drawKeyValueLine("运行说明", bench.summarySlice());
+            widgets.drawKeyValueLine(i18n.tr("运行说明", "Status Note", "実行メモ"), bench.summarySlice());
         }
 
-        // GPU 烤机活跃时绘制高密度动态几何渲染压力预览区
         if (bench.active_kind == .gpu_stress and bench.outcome == .running) {
             zgui.dummy(.{ .w = 0, .h = 10.0 * s });
             const dl = zgui.getWindowDrawList();
@@ -1157,7 +1503,6 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
             const cy = pos[1] + ch * 0.5;
             const max_r = @min(cw, ch) * 0.44;
             const phase: f32 = @floatCast(@mod(bench.elapsed_s * 2.4, std.math.pi * 2.0));
-            // 180 层抗锯齿同心旋转多边形几何光栅负载
             var k: usize = 0;
             while (k < 180) : (k += 1) {
                 const fk: f32 = @floatFromInt(k);
@@ -1192,34 +1537,65 @@ fn renderHistoryView(state: *AppState, tel: *const SharedTelemetry) void {
     const bot_h = @max(260.0 * s, avail[1] - top_h - gap);
     const half_w = @max(280.0 * s, (avail[0] - gap) * 0.5);
 
-    if (widgets.beginCard("##hist_db_status", "本地历史数据库与分级降采样状态", "SQLite WAL 模式 • 1 分钟聚合保留 7 天 • 15 分钟聚合保留 30 天 • 告警 SMART 永久保留", -1.0, top_h, s, null)) {
+    if (widgets.beginCard(
+        "##hist_db_status",
+        i18n.tr("本地历史数据库与分级降采样状态", "Local History DB & Downsampling", "ローカル履歴 DB・ダウンサンプリング"),
+        i18n.tr("SQLite WAL 模式 • 1 分钟聚合保留 7 天 • 15 分钟聚合保留 30 天 • 告警 SMART 永久保留", "SQLite WAL • 1m avg 7d • 15m avg 30d • Alert SMART retained permanently", "SQLite WAL • 1分集計7日 • 15分集計30日 • 警告SMART永久保存"),
+        -1.0,
+        top_h,
+        s,
+        null,
+    )) {
         widgets.drawStatusPill(
-            if (tel.db_active) "SQLite 持久化运行中" else "内存模式（smoke-test）",
+            if (tel.db_active)
+                i18n.tr("SQLite 持久化运行中", "SQLite Persistence Active", "SQLite 永続化稼働中")
+            else
+                i18n.tr("内存模式（smoke-test）", "In-Memory Mode", "メモリモード"),
             if (tel.db_active) p.status_ok else p.accent_cyan,
             s,
         );
         zgui.sameLine(.{});
-        zgui.textColored(p.text_secondary, "已完成批量事务写入：{d} 次", .{tel.db_flush_count});
-        widgets.drawKeyValueLine("数据库路径", state.db_path);
+        zgui.textColored(p.text_secondary, "{s}: {d}", .{ i18n.tr("已完成批量写入次数", "Batch Flushes", "バッチ書込回数"), tel.db_flush_count });
+        widgets.drawKeyValueLine(i18n.tr("数据库路径", "Database Path", "DB パス"), state.db_path);
         if (tel.db_recovered) {
-            zgui.textColored(p.status_caution, "提示：检测到旧数据库文件损坏，已自动备份并重建新库，GUI 正常运行。", .{});
+            zgui.textColored(p.status_caution, "{s}", .{i18n.tr(
+                "提示：检测到旧数据库文件损坏，已自动备份并重建新库，GUI 正常运行。",
+                "Notice: Corrupted database was backed up and rebuilt automatically.",
+                "通知：破損した旧 DB を自動バックアップして再構築しました。",
+            )});
         }
     }
     widgets.endCard();
 
     zgui.dummy(.{ .w = 0, .h = gap });
 
-    if (widgets.beginCard("##hist_gpu_temp", "GPU 温度历史趋势", "实时环形缓冲区 + 每分钟自动落盘聚合", half_w, bot_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##hist_gpu_temp",
+        i18n.tr("GPU 温度历史趋势", "GPU Temp History", "GPU 温度履歴"),
+        i18n.tr("实时环形缓冲区 + 每分钟自动落盘聚合", "Live ring buffer + 1-min SQLite flush", "リングバッファ＋1分間隔 DB 保存"),
+        half_w,
+        bot_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
-        widgets.drawLiveAreaPlot(monitoring.HISTORY_CAPACITY, "##hist_gpu_plot", "GPU °C", "°C", 20, 100, "°C", p.status_ok, &tel.gpu_temp_history, "等待 GPU 温度数据...", inner_h, s);
+        widgets.drawLiveAreaPlot(monitoring.HISTORY_CAPACITY, "##hist_gpu_plot", "GPU °C", "°C", 20, 100, "°C", p.status_ok, &tel.gpu_temp_history, i18n.tr("等待 GPU 温度数据...", "Waiting for GPU temp...", "GPU 温度待機中..."), inner_h, s);
     }
     widgets.endCard();
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##hist_disk_temp", "主磁盘温度历史趋势", "无唤醒存储温度描述符 / NVMe 综合温度", half_w, bot_h, s, &state.time_range)) {
+    if (widgets.beginCard(
+        "##hist_disk_temp",
+        i18n.tr("主磁盘温度历史趋势", "Disk 0 Temp History", "ディスク0 温度履歴"),
+        i18n.tr("无唤醒存储温度描述符 / NVMe 综合温度", "Zero-wake storage temp / NVMe composite", "非ウェイク温度取得 / NVMe 総合温度"),
+        half_w,
+        bot_h,
+        s,
+        &state.time_range,
+    )) {
         const inner_h = @max(170.0 * s, zgui.getContentRegionAvail()[1] - 4.0 * s);
-        widgets.drawLiveAreaPlot(monitoring.HISTORY_CAPACITY, "##hist_disk_plot", "Disk °C", "°C", 20, 90, "°C", p.accent_purple, &tel.disk0_temp_history, "等待磁盘温度数据...", inner_h, s);
+        widgets.drawLiveAreaPlot(monitoring.HISTORY_CAPACITY, "##hist_disk_plot", "Disk °C", "°C", 20, 90, "°C", p.accent_purple, &tel.disk0_temp_history, i18n.tr("等待磁盘温度数据...", "Waiting for disk temp...", "ディスク温度待機中..."), inner_h, s);
     }
     widgets.endCard();
 }
@@ -1229,39 +1605,54 @@ fn renderAlertsView(state: *AppState, tel: *const SharedTelemetry) void {
     const p = theme.active();
     const avail_h = @max(320.0 * s, zgui.getContentRegionAvail()[1]);
 
-    if (widgets.beginCard("##alerts_card", "告警中心与规则溯源", "持续时间防抖 30s • 温度回差恢复 5°C • 同规则 30 分钟抑制 • 磁盘规则严格对应 §2.5.5", -1.0, avail_h, s, null)) {
+    if (widgets.beginCard(
+        "##alerts_card",
+        i18n.tr("告警中心与规则溯源", "Alert Center & Rule Traceability", "アラートセンター・ルール根拠"),
+        i18n.tr("持续时间防抖 30s • 温度回差恢复 5°C • 同规则 30 分钟抑制 • 磁盘规则严格对应 §2.5.5", "30s debounce • 5°C hysteresis • 30m suppression • Disk rules strictly follow §2.5.5", "30秒デバウンス・5°Cヒステリシス・30分抑制・§2.5.5 ルール準拠"),
+        -1.0,
+        avail_h,
+        s,
+        null,
+    )) {
         widgets.drawStatusPill(
-            if (tel.active_alert_count == 0) "当前无活动告警" else "存在活动告警，请及时检查",
+            if (tel.active_alert_count == 0)
+                i18n.tr("当前无活动告警", "No Active Alerts", "アクティブなアラートなし")
+            else
+                i18n.tr("存在活动告警，请及时检查", "Active Alerts — Attention Required", "アクティブなアラートがあります"),
             if (tel.active_alert_count == 0) p.status_ok else p.status_critical,
             s,
         );
         if (tel.alert_history_count > 0) {
             zgui.sameLine(.{ .spacing = 16.0 * s });
-            if (zgui.button("全部标记已确认", .{})) {
+            if (zgui.button(i18n.tr("全部标记已确认", "Acknowledge All", "すべて確認済にする"), .{})) {
                 state.request_ack_alerts = true;
             }
         }
         zgui.dummy(.{ .w = 0, .h = 10.0 * s });
 
         if (tel.alert_history_count == 0) {
-            zgui.textColored(p.text_secondary, "暂无历史告警记录。所有温度与 SMART 健康指标均在安全范围内。", .{});
+            zgui.textColored(p.text_secondary, "{s}", .{i18n.tr(
+                "暂无历史告警记录。所有温度与 SMART 健康指标均在安全范围内。",
+                "No alert history. All temperatures and SMART health metrics are within safe ranges.",
+                "アラート履歴はありません。すべての温度および SMART 指標は安全範囲内です。",
+            )});
         } else {
             if (zgui.beginTable("##alerts_table", .{
                 .column = 5,
                 .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
             })) {
-                zgui.tableSetupColumn("级别", .{});
-                zgui.tableSetupColumn("规则 ID", .{});
-                zgui.tableSetupColumn("设备 ID", .{});
-                zgui.tableSetupColumn("触发原因与证据", .{ .init_width_or_height = 2.0 });
-                zgui.tableSetupColumn("状态", .{});
+                zgui.tableSetupColumn(i18n.tr("级别", "Level", "レベル"), .{});
+                zgui.tableSetupColumn(i18n.tr("规则 ID", "Rule ID", "ルール ID"), .{});
+                zgui.tableSetupColumn(i18n.tr("设备 ID", "Device ID", "デバイス ID"), .{});
+                zgui.tableSetupColumn(i18n.tr("触发原因与证据", "Reason & Evidence", "原因・根拠"), .{ .init_width_or_height = 2.0 });
+                zgui.tableSetupColumn(i18n.tr("状态", "State", "状態"), .{});
                 zgui.tableHeadersRow();
 
                 for (tel.alert_history[0..tel.alert_history_count]) |ev| {
                     zgui.tableNextRow(.{});
                     _ = zgui.tableNextColumn();
                     widgets.drawStatusPill(
-                        if (ev.is_recovery) "已恢复" else ev.level.labelZh(),
+                        if (ev.is_recovery) i18n.tr("已恢复", "Recovered", "回復済") else ev.level.labelZh(),
                         if (ev.is_recovery) p.status_ok else p.healthColor(ev.level),
                         s,
                     );
@@ -1272,7 +1663,7 @@ fn renderAlertsView(state: *AppState, tel: *const SharedTelemetry) void {
                     _ = zgui.tableNextColumn();
                     zgui.textWrapped("{s}", .{ev.messageSlice()});
                     _ = zgui.tableNextColumn();
-                    zgui.textColored(p.text_muted, "{s}", .{if (ev.acknowledged) "已确认" else "未确认"});
+                    zgui.textColored(p.text_muted, "{s}", .{if (ev.acknowledged) i18n.tr("已确认", "Acked", "確認済") else i18n.tr("未确认", "Unread", "未確認")});
                 }
                 zgui.endTable();
             }
@@ -1289,78 +1680,103 @@ fn renderSettingsView(state: *AppState, tel: *const SharedTelemetry) void {
     const col_w = @max(300.0 * s, (avail[0] - gap) * 0.5);
     const full_h = @max(460.0 * s, avail[1]);
 
-    if (widgets.beginCard("##settings_behavior", "外观、窗口、扩展与采集设置", "修改后点击“保存配置”持久化至 settings.toml", col_w, full_h, s, null)) {
-        zgui.textColored(p.text_secondary, "界面颜色主题（实时生效）：", .{});
-        if (zgui.radioButton("深色主题 (黑)", .{ .active = state.theme_mode == .dark })) {
+    if (widgets.beginCard(
+        "##settings_behavior",
+        i18n.tr("语言、外观、窗口与采集设置", "Language, Theme, Window & Polling", "言語・外観・ウィンドウ・監視設定"),
+        i18n.tr("修改后点击“保存配置”持久化至 settings.toml", "Click Save to persist changes to settings.toml", "変更後に「設定を保存」を押すと settings.toml に保存されます"),
+        col_w,
+        full_h,
+        s,
+        null,
+    )) {
+        zgui.textColored(p.text_secondary, "{s}", .{i18n.tr("界面显示语言（实时生效）：", "Display Language (Instant):", "表示言語（即時反映）：")});
+        if (zgui.radioButton("简体中文", .{ .active = state.language == .zh_cn })) {
+            state.language = .zh_cn;
+            i18n.setLanguage(.zh_cn);
+        }
+        zgui.sameLine(.{});
+        if (zgui.radioButton("English", .{ .active = state.language == .en_us })) {
+            state.language = .en_us;
+            i18n.setLanguage(.en_us);
+        }
+        zgui.sameLine(.{});
+        if (zgui.radioButton("日本語", .{ .active = state.language == .ja_jp })) {
+            state.language = .ja_jp;
+            i18n.setLanguage(.ja_jp);
+        }
+
+        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+        zgui.textColored(p.text_secondary, "{s}", .{i18n.tr("界面颜色主题（实时生效）：", "Color Theme (Instant):", "カラーテーマ（即時反映）：")});
+        if (zgui.radioButton(i18n.tr("深色主题 (黑)", "Dark Theme", "ダークテーマ"), .{ .active = state.theme_mode == .dark })) {
             state.theme_mode = .dark;
         }
         zgui.sameLine(.{});
-        if (zgui.radioButton("浅色主题 (白)", .{ .active = state.theme_mode == .light })) {
+        if (zgui.radioButton(i18n.tr("浅色主题 (白)", "Light Theme", "ライトテーマ"), .{ .active = state.theme_mode == .light })) {
             state.theme_mode = .light;
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-        zgui.textColored(p.text_secondary, "关闭窗口按钮行为：", .{});
-        if (zgui.radioButton("最小化到系统托盘（默认）", .{ .active = state.close_behavior == .minimize_to_tray })) {
+        zgui.textColored(p.text_secondary, "{s}", .{i18n.tr("关闭窗口按钮行为：", "Close Button Behavior:", "閉じるボタンの動作：")});
+        if (zgui.radioButton(i18n.tr("最小化到系统托盘（默认）", "Minimize to Tray (Default)", "トレイに最小化（初期値）"), .{ .active = state.close_behavior == .minimize_to_tray })) {
             state.close_behavior = .minimize_to_tray;
         }
-        if (zgui.radioButton("直接退出程序", .{ .active = state.close_behavior == .exit_app })) {
+        if (zgui.radioButton(i18n.tr("直接退出程序", "Exit Application", "アプリを終了"), .{ .active = state.close_behavior == .exit_app })) {
             state.close_behavior = .exit_app;
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-        zgui.textColored(p.text_secondary, "最小化按钮行为：", .{});
-        if (zgui.radioButton("最小化到任务栏（默认）", .{ .active = state.minimize_behavior == .minimize_to_taskbar })) {
+        zgui.textColored(p.text_secondary, "{s}", .{i18n.tr("最小化按钮行为：", "Minimize Button Behavior:", "最小化ボタンの動作：")});
+        if (zgui.radioButton(i18n.tr("最小化到任务栏（默认）", "Minimize to Taskbar (Default)", "タスクバーに最小化（初期値）"), .{ .active = state.minimize_behavior == .minimize_to_taskbar })) {
             state.minimize_behavior = .minimize_to_taskbar;
         }
-        if (zgui.radioButton("最小化到系统托盘", .{ .active = state.minimize_behavior == .minimize_to_tray })) {
+        if (zgui.radioButton(i18n.tr("最小化到系统托盘##min_tray", "Minimize to Tray##min_tray", "トレイに最小化##min_tray"), .{ .active = state.minimize_behavior == .minimize_to_tray })) {
             state.minimize_behavior = .minimize_to_tray;
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-        zgui.textColored(p.text_secondary, "温度显示单位：", .{});
-        if (zgui.radioButton("摄氏度 (°C)", .{ .active = state.temp_unit == .celsius })) {
+        zgui.textColored(p.text_secondary, "{s}", .{i18n.tr("温度显示单位：", "Temperature Unit:", "温度の単位：")});
+        if (zgui.radioButton(i18n.tr("摄氏度 (°C)", "Celsius (°C)", "摂氏 (°C)"), .{ .active = state.temp_unit == .celsius })) {
             state.temp_unit = .celsius;
         }
         zgui.sameLine(.{});
-        if (zgui.radioButton("华氏度 (°F)", .{ .active = state.temp_unit == .fahrenheit })) {
+        if (zgui.radioButton(i18n.tr("华氏度 (°F)", "Fahrenheit (°F)", "華氏 (°F)"), .{ .active = state.temp_unit == .fahrenheit })) {
             state.temp_unit = .fahrenheit;
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         var sys_ms: i32 = @intCast(state.system_interval_ms);
-        if (zgui.sliderInt("系统采集间隔 (ms)", .{ .v = &sys_ms, .min = 500, .max = 10000 })) {
+        if (zgui.sliderInt(i18n.tr("系统采集间隔 (ms)", "System Polling (ms)", "システム監視間隔 (ms)"), .{ .v = &sys_ms, .min = 500, .max = 10000 })) {
             state.system_interval_ms = @intCast(sys_ms);
         }
         var smart_s: i32 = @intCast(state.smart_interval_ms / 1000);
-        if (zgui.sliderInt("SMART 采集间隔 (秒，≥30)", .{ .v = &smart_s, .min = 30, .max = 600 })) {
+        if (zgui.sliderInt(i18n.tr("SMART 采集间隔 (秒，≥30)", "SMART Interval (sec, >=30)", "SMART 取得間隔 (秒, >=30)"), .{ .v = &smart_s, .min = 30, .max = 600 })) {
             state.smart_interval_ms = @intCast(smart_s * 1000);
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-        _ = zgui.checkbox("开机自动启动（当前用户 HKCU\\Run）", .{ .v = &state.start_with_windows });
-        _ = zgui.checkbox("暂停后台采集", .{ .v = &state.monitoring_paused });
-        _ = zgui.checkbox("允许唤醒休眠中的机械硬盘（默认关闭）", .{ .v = &state.allow_wake_standby_disk });
-        _ = zgui.checkbox("启用可选 LHM 扩展组件通信（默认关闭）", .{ .v = &state.extension_enabled });
+        _ = zgui.checkbox(i18n.tr("开机自动启动（当前用户 HKCU\\Run）", "Start with Windows (HKCU\\Run)", "Windows 起動時に自動開始 (HKCU\\Run)"), .{ .v = &state.start_with_windows });
+        _ = zgui.checkbox(i18n.tr("暂停后台采集", "Pause Background Monitoring", "バックグラウンド監視を一時停止"), .{ .v = &state.monitoring_paused });
+        _ = zgui.checkbox(i18n.tr("允许唤醒休眠中的机械硬盘（默认关闭）", "Allow Waking Standby HDDs (Default Off)", "スリープ中の HDD 起動を許可（初期オフ）"), .{ .v = &state.allow_wake_standby_disk });
+        _ = zgui.checkbox(i18n.tr("启用可选 LHM 扩展组件通信（默认关闭）", "Enable Optional LHM Extension (Default Off)", "任意 LHM 拡張通信を有効化（初期オフ）"), .{ .v = &state.extension_enabled });
 
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
         zgui.pushStyleColor4f(.{ .idx = .button, .c = p.accent_blue_soft });
         zgui.pushStyleColor4f(.{ .idx = .button_hovered, .c = p.accent_blue_hover });
         zgui.pushStyleColor4f(.{ .idx = .text, .c = p.accent_blue });
-        if (zgui.button("保存配置", .{ .w = 100.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("保存配置", "Save", "設定を保存"), .{ .w = 96.0 * s, .h = 30.0 * s })) {
             state.request_save_config = true;
         }
         zgui.popStyleColor(.{ .count = 3 });
         zgui.sameLine(.{});
-        if (zgui.button("恢复默认", .{ .w = 96.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("恢复默认", "Defaults", "初期値"), .{ .w = 92.0 * s, .h = 30.0 * s })) {
             state.request_reset_config = true;
         }
         zgui.sameLine(.{});
-        if (zgui.button("导出配置", .{ .w = 96.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("导出配置", "Export", "出力"), .{ .w = 92.0 * s, .h = 30.0 * s })) {
             state.request_export_config = true;
         }
         zgui.sameLine(.{});
-        if (zgui.button("导入配置", .{ .w = 96.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("导入配置", "Import", "読込"), .{ .w = 92.0 * s, .h = 30.0 * s })) {
             state.request_import_config = true;
         }
         if (state.config_save_msg.len > 0) {
@@ -1372,47 +1788,77 @@ fn renderSettingsView(state: *AppState, tel: *const SharedTelemetry) void {
 
     zgui.sameLine(.{ .spacing = gap });
 
-    if (widgets.beginCard("##settings_diag", "运行时、扩展组件与诊断", "全部为当前进程实时检测值", col_w, full_h, s, null)) {
-        widgets.drawKeyValueLine("运行权限", if (state.is_admin) "管理员 (Administrator)" else "普通用户 (Standard User)");
-        widgets.drawKeyValueLine("当前主题", state.theme_mode.labelZh());
-        widgets.drawKeyValueLine("部署模式", if (state.is_portable) "便携模式 (portable.flag)" else "安装模式 (%LOCALAPPDATA%)");
-        widgets.drawKeyValueLine("配置文件", if (state.config_path.len > 0) state.config_path else "N/A");
-        widgets.drawKeyValueLine("数据库路径", if (state.db_path.len > 0) state.db_path else "N/A");
-        widgets.drawKeyValueLine("系统托盘", if (state.tray_available) "已挂载" else "当前会话未挂载 Shell_TrayWnd（自动降级）");
-        widgets.drawKeyValueLine("当前字体", state.font_source);
+    if (widgets.beginCard(
+        "##settings_diag",
+        i18n.tr("运行时、扩展组件与诊断", "Runtime, Extension & Diagnostics", "ランタイム・拡張機能・診断"),
+        i18n.tr("全部为当前进程实时检测值", "Live process runtime diagnostics", "現在のプロセスのリアルタイム情報"),
+        col_w,
+        full_h,
+        s,
+        null,
+    )) {
+        widgets.drawKeyValueLine(
+            i18n.tr("运行权限", "Privilege", "実行権限"),
+            if (state.is_admin)
+                i18n.trSlice("管理员 (Administrator)", "Administrator", "管理者 (Administrator)")
+            else
+                i18n.trSlice("普通用户 (Standard User)", "Standard User", "標準ユーザー"),
+        );
+        widgets.drawKeyValueLine(i18n.tr("当前语言", "Language", "表示言語"), state.language.nativeName());
+        widgets.drawKeyValueLine(i18n.tr("当前主题", "Theme", "テーマ"), state.theme_mode.labelZh());
+        widgets.drawKeyValueLine(
+            i18n.tr("部署模式", "Deployment", "配置モード"),
+            if (state.is_portable)
+                i18n.trSlice("便携模式 (portable.flag)", "Portable (portable.flag)", "ポータブル (portable.flag)")
+            else
+                i18n.trSlice("安装模式 (%LOCALAPPDATA%)", "Installed (%LOCALAPPDATA%)", "インストール (%LOCALAPPDATA%)"),
+        );
+        widgets.drawKeyValueLine(i18n.tr("配置文件", "Config File", "設定ファイル"), if (state.config_path.len > 0) state.config_path else "N/A");
+        widgets.drawKeyValueLine(i18n.tr("数据库路径", "DB Path", "DB パス"), if (state.db_path.len > 0) state.db_path else "N/A");
+        widgets.drawKeyValueLine(
+            i18n.tr("系统托盘", "System Tray", "システムトレイ"),
+            if (state.tray_available)
+                i18n.trSlice("已挂载", "Active", "有効")
+            else
+                i18n.trSlice("未挂载（自动降级）", "Unavailable (auto-fallback)", "未検出（自動フォールバック）"),
+        );
+        widgets.drawKeyValueLine(i18n.tr("当前字体", "Font", "フォント"), state.font_source);
 
         var lhm_buf: [96]u8 = undefined;
         const lhm_txt = if (tel.extension.connected)
-            std.fmt.bufPrint(&lhm_buf, "已连接（{d} 个传感器，{s}）", .{
+            std.fmt.bufPrint(&lhm_buf, "{s} ({d} sensors, {s})", .{
+                i18n.trSlice("已连接", "Connected", "接続済"),
                 tel.extension.sensor_count,
-                if (tel.extension.helper_is_admin) "管理员" else "普通权限",
-            }) catch "已连接"
+                if (tel.extension.helper_is_admin) "Admin" else "User",
+            }) catch "Connected"
         else if (state.extension_enabled)
-            "已开启但未连接（请点击下方启动辅助进程）"
+            i18n.trSlice("已开启但未连接（请点击下方启动辅助进程）", "Enabled but disconnected (launch helper below)", "有効・未接続（下からヘルパーを起動）")
         else
-            "已关闭（默认零驱动模式）";
-        widgets.drawKeyValueLine("扩展辅助进程", lhm_txt);
+            i18n.trSlice("已关闭（默认零驱动模式）", "Disabled (default zero-driver mode)", "オフ（初期ゼロドライバ構成）");
+        widgets.drawKeyValueLine(i18n.tr("扩展辅助进程", "Extension Helper", "拡張ヘルパー"), lhm_txt);
 
         var dpi_buf: [64]u8 = undefined;
         const dpi_txt = std.fmt.bufPrint(&dpi_buf, "{d:.2}x  •  {s}", .{ state.dpi_scale, state.render_mode.labelZh() }) catch "";
-        widgets.drawKeyValueLine("DPI 与渲染", dpi_txt);
+        widgets.drawKeyValueLine(i18n.tr("DPI 与渲染", "DPI & Render", "DPI・描画"), dpi_txt);
 
-        var frm_buf: [96]u8 = undefined;
-        const frm_txt = std.fmt.bufPrint(&frm_buf, "已渲染 {d} 帧  •  节能跳过 {d} 帧  •  热插拔 {d}  •  电源恢复 {d}", .{
+        var frm_buf: [128]u8 = undefined;
+        const frm_txt = std.fmt.bufPrint(&frm_buf, "{s} {d}  •  {s} {d}  •  PnP {d}  •  Resume {d}", .{
+            i18n.trSlice("已渲染", "Rendered", "描画済"),
             state.rendered_frames,
+            i18n.trSlice("节能跳过", "Skipped", "省電力スキップ"),
             state.skipped_frames,
             state.device_change_events,
             state.power_resume_events,
         }) catch "";
-        widgets.drawKeyValueLine("运行统计", frm_txt);
-        widgets.drawKeyValueLine("开源许可", "主程序 Apache-2.0  •  可选扩展组件边界 MPL-2.0");
+        widgets.drawKeyValueLine(i18n.tr("运行统计", "Runtime Stats", "稼働統計"), frm_txt);
+        widgets.drawKeyValueLine(i18n.tr("开源许可", "License", "ライセンス"), "Core: Apache-2.0  •  Optional Helper: MPL-2.0");
 
         zgui.dummy(.{ .w = 0, .h = 10.0 * s });
-        if (zgui.button("启动 LHM 辅助进程 (需管理员)", .{ .w = 210.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("启动 LHM 辅助进程 (需管理员)", "Launch LHM Helper (Admin)", "LHM ヘルパー起動 (管理者)"), .{ .w = 215.0 * s, .h = 30.0 * s })) {
             state.request_launch_lhm_helper = true;
         }
         zgui.sameLine(.{});
-        if (zgui.button("停止辅助进程", .{ .w = 110.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("停止辅助进程", "Stop Helper", "ヘルパー停止"), .{ .w = 115.0 * s, .h = 30.0 * s })) {
             state.request_stop_lhm_helper = true;
         }
         if (state.lhm_action_msg.len > 0) {
@@ -1421,11 +1867,11 @@ fn renderSettingsView(state: *AppState, tel: *const SharedTelemetry) void {
         }
 
         zgui.dummy(.{ .w = 0, .h = 10.0 * s });
-        if (zgui.button("导出脱敏诊断报告", .{ .w = 165.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("导出脱敏诊断报告", "Export Diagnostics", "診断レポート出力"), .{ .w = 165.0 * s, .h = 30.0 * s })) {
             state.request_export_diag = true;
         }
         zgui.sameLine(.{});
-        if (zgui.button("安全退出程序", .{ .w = 135.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("安全退出程序", "Exit Safely", "安全に終了"), .{ .w = 135.0 * s, .h = 30.0 * s })) {
             state.should_exit = true;
         }
         if (state.diag_export_msg.len > 0) {

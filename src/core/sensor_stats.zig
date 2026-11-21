@@ -1,7 +1,8 @@
 const std = @import("std");
+const i18n = @import("i18n.zig");
 
 /// HWiNFO64 风格全局传感器统计表（跨平台核心层，不依赖任何 OS API）。
-/// 维护全部活跃传感器的当前值 / 最小值 / 平均值 / 最大值与采样次数，支持一键清零与 CSV 导出。
+/// 维护全部活跃传感器的当前值 / 最小值 / 平均值 / 最大值与采样次数，支持一键清零、多语言展示与 CSV 导出。
 pub const MAX_STAT_SENSORS = 128;
 
 pub const SensorStatEntry = struct {
@@ -29,6 +30,43 @@ pub const SensorStatEntry = struct {
     }
     pub fn avg(self: *const SensorStatEntry) f64 {
         return if (self.count > 0) self.sum_val / @as(f64, @floatFromInt(self.count)) else self.current;
+    }
+
+    /// 根据当前界面语言返回本地化分类名称（内部键恒定，切换语言零重复行）
+    pub fn localizedCategory(self: *const SensorStatEntry) []const u8 {
+        const c = self.categorySlice();
+        if (std.mem.eql(u8, c, "cat:memory")) return i18n.trSlice("内存", "Memory", "メモリ");
+        if (std.mem.eql(u8, c, "cat:storage_io")) return i18n.trSlice("存储 I/O", "Storage I/O", "ストレージ I/O");
+        if (std.mem.eql(u8, c, "cat:power")) return i18n.trSlice("电源", "Power", "電源");
+        if (std.mem.eql(u8, c, "cat:disk")) return i18n.trSlice("磁盘", "Disk", "ディスク");
+        if (std.mem.eql(u8, c, "cat:ext")) return i18n.trSlice("扩展传感器", "Extension", "拡張センサー");
+        return c;
+    }
+
+    /// 根据当前界面语言返回本地化传感器名称（厂商原始传感器名原样保留）
+    pub fn localizedName(self: *const SensorStatEntry, buf: *[96]u8) []const u8 {
+        const n = self.nameSlice();
+        if (std.mem.eql(u8, n, "cpu.usage")) return i18n.trSlice("CPU 总体使用率", "CPU Total Usage", "CPU 合計使用率");
+        if (std.mem.eql(u8, n, "cpu.clock")) return i18n.trSlice("CPU 计算频率", "CPU Effective Clock", "CPU 動作クロック");
+        if (std.mem.eql(u8, n, "cpu.pkg_temp")) return i18n.trSlice("CPU 封装温度 (LHM)", "CPU Package Temp (LHM)", "CPU パッケージ温度 (LHM)");
+        if (std.mem.eql(u8, n, "cpu.pkg_power")) return i18n.trSlice("CPU 封装功耗 (LHM)", "CPU Package Power (LHM)", "CPU パッケージ電力 (LHM)");
+        if (std.mem.eql(u8, n, "mem.usage")) return i18n.trSlice("物理内存使用率", "Physical Memory Load", "物理メモリ使用率");
+        if (std.mem.eql(u8, n, "io.read")) return i18n.trSlice("总读取吞吐", "Total Disk Read", "総ディスク読込");
+        if (std.mem.eql(u8, n, "io.write")) return i18n.trSlice("总写入吞吐", "Total Disk Write", "総ディスク書込");
+        if (std.mem.eql(u8, n, "io.iops")) return i18n.trSlice("总磁盘 IOPS", "Total Disk IOPS", "総ディスク IOPS");
+        if (std.mem.eql(u8, n, "power.battery")) return i18n.trSlice("电池剩余电量", "Battery Charge", "バッテリー残量");
+        if (std.mem.eql(u8, n, "gpu.temp")) return i18n.trSlice("GPU 核心温度", "GPU Core Temperature", "GPU コア温度");
+        if (std.mem.eql(u8, n, "gpu.power")) return i18n.trSlice("GPU 实时功耗", "GPU Power Draw", "GPU 消費電力");
+        if (std.mem.eql(u8, n, "gpu.usage")) return i18n.trSlice("GPU 核心占用", "GPU Core Load", "GPU コア使用率");
+        if (std.mem.eql(u8, n, "gpu.fan")) return i18n.trSlice("GPU 风扇转速", "GPU Fan Speed", "GPU ファン速度");
+        if (std.mem.startsWith(u8, n, "disk.temp.")) {
+            const idx_str = n["disk.temp.".len..];
+            return std.fmt.bufPrint(buf, "Disk {s} {s}", .{
+                idx_str,
+                i18n.trSlice("温度", "Temp", "温度"),
+            }) catch n;
+        }
+        return n;
     }
 };
 
@@ -90,12 +128,13 @@ pub const SensorStatsTable = struct {
         errdefer out.deinit(allocator);
         const w = out.writer(allocator);
 
-        // UTF-8 BOM for clean Chinese display in Excel
+        // UTF-8 BOM for clean CJK display in Excel
         try w.writeAll("\xEF\xBB\xBFCategory,Sensor,Unit,Current,Min,Avg,Max,Samples\r\n");
+        var name_buf: [96]u8 = undefined;
         for (self.entries[0..self.count]) |*e| {
             try w.print("\"{s}\",\"{s}\",\"{s}\",{d:.2},{d:.2},{d:.2},{d:.2},{d}\r\n", .{
-                e.categorySlice(),
-                e.nameSlice(),
+                e.localizedCategory(),
+                e.localizedName(&name_buf),
                 e.unitSlice(),
                 e.current,
                 e.min_val,

@@ -3,6 +3,7 @@ const sensor = @import("sensor.zig");
 const HealthLevel = sensor.HealthLevel;
 const nvme = @import("../collectors/storage/nvme_smart.zig");
 const ata = @import("../collectors/storage/ata_smart.zig");
+const i18n = @import("i18n.zig");
 
 /// 规范 §2.5.5 磁盘健康判定引擎与基线机制。
 /// 严格遵守红线 #3/#4：
@@ -97,32 +98,63 @@ pub fn evaluateNvme(data: *const nvme.NvmeSmartData, baseline: ?*const DiskBasel
 
     const cw = data.critical_warning;
     if ((cw & (1 << 0)) != 0) {
-        out.addHit("NVME-CW-SPARE", .critical, "Critical Warning bit 0 置位（可用备用空间低于阈值）", .{});
+        out.addHit("NVME-CW-SPARE", .critical, "{s}", .{i18n.trSlice(
+            "Critical Warning bit 0 置位（可用备用空间低于阈值）",
+            "Critical Warning bit 0 set (available spare below threshold)",
+            "Critical Warning ビット0検出（予備領域が閾値未満）",
+        )});
     }
     if ((cw & (1 << 1)) != 0) {
-        out.addHit("NVME-CW-TEMP", .warning, "Critical Warning bit 1 置位（温度超出设备安全范围）", .{});
+        out.addHit("NVME-CW-TEMP", .warning, "{s}", .{i18n.trSlice(
+            "Critical Warning bit 1 置位（温度超出设备安全范围）",
+            "Critical Warning bit 1 set (temperature outside safe range)",
+            "Critical Warning ビット1検出（温度が許容範囲外）",
+        )});
     }
     if ((cw & (1 << 2)) != 0) {
-        out.addHit("NVME-CW-RELIABILITY", .critical, "Critical Warning bit 2 置位（NVM 子系统可靠性显著下降）", .{});
+        out.addHit("NVME-CW-RELIABILITY", .critical, "{s}", .{i18n.trSlice(
+            "Critical Warning bit 2 置位（NVM 子系统可靠性显著下降）",
+            "Critical Warning bit 2 set (NVM subsystem reliability degraded)",
+            "Critical Warning ビット2検出（NVM信頼性低下）",
+        )});
     }
     if ((cw & (1 << 3)) != 0) {
-        out.addHit("NVME-CW-READONLY", .critical, "Critical Warning bit 3 置位（介质已进入只读保护模式）", .{});
+        out.addHit("NVME-CW-READONLY", .critical, "{s}", .{i18n.trSlice(
+            "Critical Warning bit 3 置位（介质已进入只读保护模式）",
+            "Critical Warning bit 3 set (media placed in read-only mode)",
+            "Critical Warning ビット3検出（メディア読取専用モード）",
+        )});
     }
     if ((cw & (1 << 4)) != 0) {
-        out.addHit("NVME-CW-BACKUP", .warning, "Critical Warning bit 4 置位（易失性写缓存备份设备失效）", .{});
+        out.addHit("NVME-CW-BACKUP", .warning, "{s}", .{i18n.trSlice(
+            "Critical Warning bit 4 置位（易失性写缓存备份设备失效）",
+            "Critical Warning bit 4 set (volatile memory backup device failed)",
+            "Critical Warning ビット4検出（キャッシュ保護装置異常）",
+        )});
     }
 
     if (data.available_spare < data.available_spare_threshold) {
-        out.addHit("NVME-SPARE", .critical, "可用备用空间 {d}% 低于设备阈值 {d}%", .{ data.available_spare, data.available_spare_threshold });
+        out.addHit("NVME-SPARE", .critical, "{s}: {d}% < {d}%", .{
+            i18n.trSlice("可用备用空间低于阈值", "Available spare below threshold", "予備領域が閾値未満"),
+            data.available_spare,
+            data.available_spare_threshold,
+        });
     }
 
     if (data.media_errors > 0) {
-        out.addHit("NVME-MEDIA", .caution, "检测到介质与数据完整性错误：{d} 次", .{data.media_errors});
+        out.addHit("NVME-MEDIA", .caution, "{s}: {d}", .{
+            i18n.trSlice("介质与数据完整性错误", "Media & data integrity errors", "メディア・整合性エラー"),
+            data.media_errors,
+        });
     }
     if (baseline) |bl| {
         if (bl.initialized) {
             if (data.media_errors > bl.nvme_media_errors) {
-                out.addHit("NVME-MEDIA-INC", .warning, "介质错误相对基线增加：{d} -> {d}", .{ bl.nvme_media_errors, data.media_errors });
+                out.addHit("NVME-MEDIA-INC", .warning, "{s}: {d} -> {d}", .{
+                    i18n.trSlice("介质错误相对基线增加", "Media errors increased vs baseline", "メディアエラーが基準値から増加"),
+                    bl.nvme_media_errors,
+                    data.media_errors,
+                });
             } else if (data.media_errors < bl.nvme_media_errors) {
                 out.counter_decreased_note = true;
             }
@@ -130,9 +162,17 @@ pub fn evaluateNvme(data: *const nvme.NvmeSmartData, baseline: ?*const DiskBasel
     }
 
     if (data.percentage_used >= cfg.nvme_used_warning) {
-        out.addHit("NVME-USED-2", .warning, "预计寿命使用率 {d}% 达到警告阈值 {d}%（非精确剩余寿命）", .{ data.percentage_used, cfg.nvme_used_warning });
+        out.addHit("NVME-USED-2", .warning, "{s}: {d}% >= {d}%", .{
+            i18n.trSlice("预计寿命使用率达到警告阈值", "Percentage used reached warning threshold", "寿命消費率が警告閾値に到達"),
+            data.percentage_used,
+            cfg.nvme_used_warning,
+        });
     } else if (data.percentage_used >= cfg.nvme_used_caution) {
-        out.addHit("NVME-USED-1", .caution, "预计寿命使用率 {d}% 达到注意阈值 {d}%（非精确剩余寿命）", .{ data.percentage_used, cfg.nvme_used_caution });
+        out.addHit("NVME-USED-1", .caution, "{s}: {d}% >= {d}%", .{
+            i18n.trSlice("预计寿命使用率达到注意阈值", "Percentage used reached caution threshold", "寿命消費率が注意閾値に到達"),
+            data.percentage_used,
+            cfg.nvme_used_caution,
+        });
     }
 
     return out;
@@ -148,21 +188,25 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
     out.overall = .normal;
 
     if (data.smart_status_checked and data.smart_status_failed) {
-        out.addHit("ATA-STATUS", .critical, "SMART RETURN STATUS 报告设备阈值超限", .{});
+        out.addHit("ATA-STATUS", .critical, "{s}", .{i18n.trSlice(
+            "SMART RETURN STATUS 报告设备阈值超限",
+            "SMART RETURN STATUS reported threshold exceeded",
+            "SMART RETURN STATUS が閾値超過を報告",
+        )});
     }
 
     // ATA-PREFAIL & ATA-OLDAGE
     for (data.attrs[0..data.attr_count]) |a| {
         if (a.has_threshold and a.threshold != 0 and a.current <= a.threshold) {
             if (a.isPrefail()) {
-                out.addHit("ATA-PREFAIL", .critical, "Prefail 属性 0x{X:0>2}({s}) 当前值 {d} <= 阈值 {d}", .{
+                out.addHit("ATA-PREFAIL", .critical, "Prefail 0x{X:0>2}({s}) {d} <= {d}", .{
                     a.id,
                     ata.AtaAttribute.knownNameZh(a.id),
                     a.current,
                     a.threshold,
                 });
             } else {
-                out.addHit("ATA-OLDAGE", .caution, "Old-age 属性 0x{X:0>2}({s}) 当前值 {d} <= 阈值 {d}", .{
+                out.addHit("ATA-OLDAGE", .caution, "Old-age 0x{X:0>2}({s}) {d} <= {d}", .{
                     a.id,
                     ata.AtaAttribute.knownNameZh(a.id),
                     a.current,
@@ -176,11 +220,15 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
     if (data.findAttr(0x05)) |a05| {
         const raw = a05.rawU48();
         if (raw > 0) {
-            out.addHit("ATA-05", .caution, "05 重映射扇区计数原始值 = {d}", .{raw});
+            out.addHit("ATA-05", .caution, "05 {s} = {d}", .{ ata.AtaAttribute.knownNameZh(0x05), raw });
         }
         if (baseline) |bl| if (bl.initialized) {
             if (raw > bl.ata_05_raw) {
-                out.addHit("ATA-05-INC", .warning, "05 重映射扇区相对基线增加：{d} -> {d}", .{ bl.ata_05_raw, raw });
+                out.addHit("ATA-05-INC", .warning, "05 {s}: {d} -> {d}", .{
+                    i18n.trSlice("重映射扇区增加", "Reallocated sectors increased", "代替処理セクタ増加"),
+                    bl.ata_05_raw,
+                    raw,
+                });
             } else if (raw < bl.ata_05_raw) {
                 out.counter_decreased_note = true;
             }
@@ -191,7 +239,7 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
     if (data.findAttr(0xC5)) |ac5| {
         const raw = ac5.rawU48();
         if (raw > 0) {
-            out.addHit("ATA-C5", .warning, "C5 当前待处理扇区原始值 = {d}", .{raw});
+            out.addHit("ATA-C5", .warning, "C5 {s} = {d}", .{ ata.AtaAttribute.knownNameZh(0xC5), raw });
         }
     }
 
@@ -199,11 +247,15 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
     if (data.findAttr(0xC6)) |ac6| {
         const raw = ac6.rawU48();
         if (raw > 0) {
-            out.addHit("ATA-C6", .warning, "C6 离线不可校正扇区原始值 = {d}", .{raw});
+            out.addHit("ATA-C6", .warning, "C6 {s} = {d}", .{ ata.AtaAttribute.knownNameZh(0xC6), raw });
         }
         if (baseline) |bl| if (bl.initialized) {
             if (raw > bl.ata_c6_raw) {
-                out.addHit("ATA-C6-INC", .critical, "C6 离线不可校正扇区相对基线增加：{d} -> {d}", .{ bl.ata_c6_raw, raw });
+                out.addHit("ATA-C6-INC", .critical, "C6 {s}: {d} -> {d}", .{
+                    i18n.trSlice("离线不可校正扇区增加", "Offline uncorrectable increased", "回復不能セクタ増加"),
+                    bl.ata_c6_raw,
+                    raw,
+                });
             } else if (raw < bl.ata_c6_raw) {
                 out.counter_decreased_note = true;
             }
@@ -215,7 +267,11 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
         const raw = abb.rawU48();
         if (baseline) |bl| if (bl.initialized) {
             if (raw > bl.ata_bb_raw) {
-                out.addHit("ATA-BB", .caution, "BB 报告不可校正错误相对基线增加：{d} -> {d}", .{ bl.ata_bb_raw, raw });
+                out.addHit("ATA-BB", .caution, "BB {s}: {d} -> {d}", .{
+                    i18n.trSlice("不可校正错误增加", "Uncorrectable errors increased", "回復不能エラー増加"),
+                    bl.ata_bb_raw,
+                    raw,
+                });
             } else if (raw < bl.ata_bb_raw) {
                 out.counter_decreased_note = true;
             }
@@ -227,7 +283,11 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
         const raw = ac7.rawU48();
         if (baseline) |bl| if (bl.initialized) {
             if (raw > bl.ata_c7_raw) {
-                out.addHit("ATA-C7-INC", .caution, "C7 接口 CRC 错误增加（{d} -> {d}），请检查数据线或接口，非盘片损坏", .{ bl.ata_c7_raw, raw });
+                out.addHit("ATA-C7-INC", .caution, "C7 {s} ({d} -> {d})", .{
+                    i18n.trSlice("接口 CRC 错误增加，请检查数据线/接口", "CRC errors increased; check cable/port", "CRCエラー増加（ケーブル/端子を確認）"),
+                    bl.ata_c7_raw,
+                    raw,
+                });
             } else if (raw < bl.ata_c7_raw) {
                 out.counter_decreased_note = true;
             }
@@ -238,7 +298,12 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
     const life_attr = data.findAttr(0xE7) orelse data.findAttr(0xE9);
     if (life_attr) |la| {
         if (la.current > 0 and la.current < cfg.ssd_life_left_warning) {
-            out.addHit("SSD-LIFE", .warning, "SSD 寿命指标 0x{X:0>2} 当前值 {d}% 低于 {d}%", .{ la.id, la.current, cfg.ssd_life_left_warning });
+            out.addHit("SSD-LIFE", .warning, "{s} 0x{X:0>2}: {d}% < {d}%", .{
+                i18n.trSlice("SSD 寿命指标偏低", "SSD life left low", "SSD 残り寿命低下"),
+                la.id,
+                la.current,
+                cfg.ssd_life_left_warning,
+            });
         }
     }
 

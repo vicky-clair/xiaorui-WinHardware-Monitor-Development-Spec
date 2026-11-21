@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const i18n = @import("i18n.zig");
+const win32 = @import("../providers/windows/win32.zig");
 
 const linux_fadvise = if (builtin.os.tag == .linux) struct {
     extern "c" fn posix_fadvise(fd: c_int, offset: i64, len: i64, advice: c_int) c_int;
@@ -10,6 +12,8 @@ const linux_fadvise = if (builtin.os.tag == .linux) struct {
 /// 安全约束（AGENTS.md V2.0 红线 #6）：
 /// 1. 仅在用户主动点击并二次确认后执行；
 /// 2. 磁盘测速严禁写入裸物理磁盘扇区，仅在用户选定目录创建受控临时文件并于结束后自动删除；
+///    - Windows 优先启用 FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH + 4K 对齐缓冲，绕过系统页缓存测真实物理磁盘速度；
+///    - Linux 通过 posix_fadvise(POSIX_FADV_DONTNEED) 驱逐内核页缓存。
 /// 3. 内置实时高温自动熔断保护（由监控线程实时喂入当前 CPU/GPU 温度，超阈值立即中断所有测试线程）。
 pub const TestKind = enum(u8) {
     none,
@@ -20,11 +24,11 @@ pub const TestKind = enum(u8) {
 
     pub fn labelZh(self: TestKind) [:0]const u8 {
         return switch (self) {
-            .none => "空闲",
-            .cpu_stress => "CPU 稳定性与算力测试",
-            .memory_verify => "内存带宽与位翻转校验",
-            .disk_bench => "磁盘文件级读写基准测试",
-            .gpu_stress => "GPU OpenGL 散热与稳定性烤机",
+            .none => i18n.tr("空闲", "Idle", "待機中"),
+            .cpu_stress => i18n.tr("CPU 稳定性与算力测试", "CPU Stability & Compute", "CPU 安定性・演算テスト"),
+            .memory_verify => i18n.tr("内存带宽与位翻转校验", "Memory Bandwidth & Bit-Flip", "メモリ帯域・ビット検証"),
+            .disk_bench => i18n.tr("磁盘文件级读写基准测试", "Disk File-Level Benchmark", "ディスク読込/書込ベンチマーク"),
+            .gpu_stress => i18n.tr("GPU OpenGL 散热与稳定性烤机", "GPU OpenGL Stress Test", "GPU OpenGL 負荷テスト"),
         };
     }
 };
@@ -40,13 +44,13 @@ pub const TestOutcome = enum(u8) {
 
     pub fn labelZh(self: TestOutcome) [:0]const u8 {
         return switch (self) {
-            .idle => "尚未运行",
-            .running => "测试运行中",
-            .passed => "通过（零错误）",
-            .failed_errors => "检出硬件计算/内存错误",
-            .stopped_by_user => "用户手动停止",
-            .stopped_by_thermal => "触发高温熔断保护已自动停机",
-            .failed_io => "I/O 或资源初始化失败",
+            .idle => i18n.tr("尚未运行", "Not Run", "未実行"),
+            .running => i18n.tr("测试运行中", "Running", "実行中"),
+            .passed => i18n.tr("通过（零错误）", "Passed (0 Errors)", "合格（エラーなし）"),
+            .failed_errors => i18n.tr("检出硬件计算/内存错误", "Hardware/Memory Error Detected", "ハードウェア/メモリエラー検出"),
+            .stopped_by_user => i18n.tr("用户手动停止", "Stopped by User", "ユーザーにより停止"),
+            .stopped_by_thermal => i18n.tr("触发高温熔断保护已自动停机", "Thermal Cutoff Triggered", "高温保護により自動停止"),
+            .failed_io => i18n.tr("I/O 或资源初始化失败", "I/O or Init Failed", "I/O または初期化失敗"),
         };
     }
 };
@@ -157,7 +161,7 @@ pub const BenchmarkRunner = struct {
         if (self.snap.active_kind == .gpu_stress and self.snap.outcome == .running) {
             self.snap.active_kind = .none;
             self.snap.outcome = if (self.thermal_trip_flag.load(.acquire)) .stopped_by_thermal else .stopped_by_user;
-            setSummary(&self.snap, "GPU OpenGL 烤机已停止");
+            setSummary(&self.snap, i18n.trSlice("GPU OpenGL 烤机已停止", "GPU OpenGL stress stopped", "GPU OpenGL 負荷テストを停止しました"));
         }
         self.mutex.unlock();
     }
@@ -195,14 +199,18 @@ pub const BenchmarkRunner = struct {
             .thermal_cutoff_c = std.math.clamp(cfg.thermal_cutoff_c, 65.0, 105.0),
             .cpu_threads = threads,
         };
-        setSummary(&self.snap, "正在运行多线程整数/浮点确定性校验负载...");
+        setSummary(&self.snap, i18n.trSlice(
+            "正在运行多线程整数/浮点确定性校验负载...",
+            "Running multi-threaded integer/FP deterministic verification...",
+            "マルチスレッド整数/浮動小数点検証を実行中...",
+        ));
         self.mutex.unlock();
 
         self.worker_thread = std.Thread.spawn(.{}, cpuStressMain, .{ self, threads, dur }) catch {
             self.mutex.lock();
             self.snap.active_kind = .none;
             self.snap.outcome = .failed_io;
-            setSummary(&self.snap, "无法创建 CPU 测试工作线程");
+            setSummary(&self.snap, i18n.trSlice("无法创建 CPU 测试工作线程", "Failed to spawn CPU test worker thread", "CPU テストスレッドの作成に失敗しました"));
             self.mutex.unlock();
             return false;
         };
@@ -231,14 +239,18 @@ pub const BenchmarkRunner = struct {
             .thermal_cutoff_c = std.math.clamp(cfg.thermal_cutoff_c, 65.0, 105.0),
             .mem_tested_mb = size_mb,
         };
-        setSummary(&self.snap, "正在执行 4 轮内存位翻转与带宽校验...");
+        setSummary(&self.snap, i18n.trSlice(
+            "正在执行 4 轮内存位翻转与带宽校验...",
+            "Running 4-pass memory bit-flip & bandwidth verification...",
+            "4パス メモリビット反転・帯域検証を実行中...",
+        ));
         self.mutex.unlock();
 
         self.worker_thread = std.Thread.spawn(.{}, memoryVerifyMain, .{ self, size_mb }) catch {
             self.mutex.lock();
             self.snap.active_kind = .none;
             self.snap.outcome = .failed_io;
-            setSummary(&self.snap, "无法创建内存测试线程");
+            setSummary(&self.snap, i18n.trSlice("无法创建内存测试线程", "Failed to spawn memory test thread", "メモリテストスレッドの作成に失敗しました"));
             self.mutex.unlock();
             return false;
         };
@@ -263,7 +275,11 @@ pub const BenchmarkRunner = struct {
             .thermal_cutoff_c = std.math.clamp(cfg.thermal_cutoff_c, 65.0, 105.0),
             .disk_file_mb = file_mb,
         };
-        setSummary(&self.snap, "正在指定目录创建受控临时文件执行 SEQ1M / RND4K 测试...");
+        setSummary(&self.snap, i18n.trSlice(
+            "正在指定目录创建受控临时文件执行无缓存 SEQ1M / RND4K 测试...",
+            "Running unbuffered SEQ1M / RND4K benchmark on controlled temp file...",
+            "一時ファイルでキャッシュ無効 SEQ1M / RND4K ベンチマーク実行中...",
+        ));
         self.mutex.unlock();
 
         self.worker_thread = std.Thread.spawn(.{}, diskBenchMain, .{ self, file_mb, dir_copy }) catch {
@@ -271,7 +287,7 @@ pub const BenchmarkRunner = struct {
             self.mutex.lock();
             self.snap.active_kind = .none;
             self.snap.outcome = .failed_io;
-            setSummary(&self.snap, "无法创建磁盘基准测试线程");
+            setSummary(&self.snap, i18n.trSlice("无法创建磁盘基准测试线程", "Failed to spawn disk benchmark thread", "ディスクベンチマークスレッド作成失敗"));
             self.mutex.unlock();
             return false;
         };
@@ -298,7 +314,11 @@ pub const BenchmarkRunner = struct {
             .target_duration_s = dur,
             .thermal_cutoff_c = std.math.clamp(cfg.thermal_cutoff_c, 65.0, 100.0),
         };
-        setSummary(&self.snap, "正在运行 OpenGL 3.3 高密度图形渲染烤机...");
+        setSummary(&self.snap, i18n.trSlice(
+            "正在运行 OpenGL 3.3 高密度图形渲染烤机...",
+            "Running OpenGL 3.3 high-density rendering stress test...",
+            "OpenGL 3.3 高密度描画負荷テストを実行中...",
+        ));
         self.mutex.unlock();
         return true;
     }
@@ -312,13 +332,13 @@ pub const BenchmarkRunner = struct {
         if (self.thermal_trip_flag.load(.acquire)) {
             self.snap.active_kind = .none;
             self.snap.outcome = .stopped_by_thermal;
-            setSummary(&self.snap, "GPU 烤机触发高温熔断保护，已安全停机");
+            setSummary(&self.snap, i18n.trSlice("GPU 烤机触发高温熔断保护，已安全停机", "GPU stress stopped by thermal cutoff", "GPU 負荷テストが高温保護で安全停止しました"));
             return false;
         }
         if (self.cancel_flag.load(.acquire)) {
             self.snap.active_kind = .none;
             self.snap.outcome = .stopped_by_user;
-            setSummary(&self.snap, "GPU 烤机已被用户手动停止");
+            setSummary(&self.snap, i18n.trSlice("GPU 烤机已被用户手动停止", "GPU stress stopped by user", "GPU 負荷テストはユーザーにより停止されました"));
             return false;
         }
 
@@ -335,7 +355,7 @@ pub const BenchmarkRunner = struct {
             self.snap.active_kind = .none;
             self.snap.outcome = .passed;
             self.snap.progress_pct = 100.0;
-            setSummary(&self.snap, "GPU OpenGL 稳定性烤机完成（零异常）");
+            setSummary(&self.snap, i18n.trSlice("GPU OpenGL 稳定性烤机完成（零异常）", "GPU OpenGL stress completed (0 errors)", "GPU OpenGL 安定性テスト完了（異常なし）"));
             return false;
         }
         return true;
@@ -349,33 +369,46 @@ pub const BenchmarkRunner = struct {
         const w = out.writer(allocator);
 
         try w.writeAll("============================================================\r\n");
-        try w.writeAll("WinHardware Monitor V2.0 — 硬件基准与稳定性测试报告\r\n");
+        try w.print("{s}\r\n", .{i18n.trSlice(
+            "WinHardware Monitor V2.0 — 硬件基准与稳定性测试报告",
+            "WinHardware Monitor V2.0 — Hardware Benchmark & Stability Report",
+            "WinHardware Monitor V2.0 — ハードウェア ベンチマーク・安定性レポート",
+        )});
         try w.writeAll("============================================================\r\n");
-        try w.print("测试时间 (UTC ms): {d}\r\n", .{std.time.milliTimestamp()});
-        try w.print("处理器: {s}\r\n", .{cpu_name});
-        try w.print("图形处理器: {s}\r\n", .{gpu_name});
-        try w.print("最近测试项: {s}\r\n", .{snap.last_kind.labelZh()});
-        try w.print("最终结论: {s}\r\n", .{snap.outcome.labelZh()});
-        try w.print("运行时长: {d:.2} 秒\r\n", .{snap.elapsed_s});
-        try w.print("错误计数: {d}\r\n", .{snap.error_count});
+        try w.print("{s}: {d}\r\n", .{ i18n.trSlice("测试时间 (UTC ms)", "Timestamp (UTC ms)", "テスト日時 (UTC ms)"), std.time.milliTimestamp() });
+        try w.print("CPU: {s}\r\n", .{cpu_name});
+        try w.print("GPU: {s}\r\n", .{gpu_name});
+        try w.print("{s}: {s}\r\n", .{ i18n.trSlice("最近测试项", "Test Item", "テスト項目"), snap.last_kind.labelZh() });
+        try w.print("{s}: {s}\r\n", .{ i18n.trSlice("最终结论", "Result", "判定結果"), snap.outcome.labelZh() });
+        try w.print("{s}: {d:.2} s\r\n", .{ i18n.trSlice("运行时长", "Duration", "実行時間"), snap.elapsed_s });
+        try w.print("{s}: {d}\r\n", .{ i18n.trSlice("错误计数", "Error Count", "エラー数"), snap.error_count });
         if (snap.peak_temp_c) |pt| {
-            try w.print("期间峰值温度: {d:.1} °C (熔断阈值 {d:.0} °C)\r\n", .{ pt, snap.thermal_cutoff_c });
+            try w.print("{s}: {d:.1} °C ({s} {d:.0} °C)\r\n", .{
+                i18n.trSlice("期间峰值温度", "Peak Temp", "最高温度"),
+                pt,
+                i18n.trSlice("熔断阈值", "Cutoff", "保護閾値"),
+                snap.thermal_cutoff_c,
+            });
         } else {
-            try w.print("期间峰值温度: N/A (熔断阈值 {d:.0} °C)\r\n", .{snap.thermal_cutoff_c});
+            try w.print("{s}: N/A ({s} {d:.0} °C)\r\n", .{
+                i18n.trSlice("期间峰值温度", "Peak Temp", "最高温度"),
+                i18n.trSlice("熔断阈值", "Cutoff", "保護閾値"),
+                snap.thermal_cutoff_c,
+            });
         }
         try w.writeAll("------------------------------------------------------------\r\n");
         switch (snap.last_kind) {
-            .cpu_stress => try w.print("CPU 线程数: {d} | 综合算力吞吐: {d:.2} MOPS\r\n", .{ snap.cpu_threads, snap.cpu_score_mops }),
-            .memory_verify => try w.print("校验容量: {d} MB | 完成轮数: {d}/4 | 写入带宽: {d:.2} GB/s | 回读校验带宽: {d:.2} GB/s\r\n", .{
+            .cpu_stress => try w.print("CPU Threads: {d} | Score: {d:.2} MOPS\r\n", .{ snap.cpu_threads, snap.cpu_score_mops }),
+            .memory_verify => try w.print("Memory: {d} MB | Passes: {d}/4 | Write: {d:.2} GB/s | Read+Verify: {d:.2} GB/s\r\n", .{
                 snap.mem_tested_mb, snap.mem_passes_done, snap.mem_write_gbs, snap.mem_read_gbs,
             }),
-            .disk_bench => try w.print("临时测试文件: {d} MB (已自动清理)\r\nSEQ1M 写入: {d:.1} MB/s | SEQ1M 读取: {d:.1} MB/s\r\nRND4K 随机读取: {d:.1} MB/s ({d:.0} IOPS, 平均延迟 {d:.1} us)\r\n", .{
+            .disk_bench => try w.print("Temp File: {d} MB (auto-deleted)\r\nSEQ1M Write: {d:.1} MB/s | SEQ1M Read: {d:.1} MB/s\r\nRND4K Read: {d:.1} MB/s ({d:.0} IOPS, Avg Lat {d:.1} us)\r\n", .{
                 snap.disk_file_mb, snap.disk_seq_write_mbs, snap.disk_seq_read_mbs, snap.disk_rnd4k_read_mbs, snap.disk_rnd4k_read_iops, snap.disk_rnd4k_avg_lat_us,
             }),
-            .gpu_stress => try w.print("渲染帧数: {d} | 平均帧率: {d:.1} FPS\r\n", .{ snap.gpu_frames, snap.gpu_avg_fps }),
-            .none => try w.writeAll("尚未执行测试。\r\n"),
+            .gpu_stress => try w.print("Frames: {d} | Avg FPS: {d:.1}\r\n", .{ snap.gpu_frames, snap.gpu_avg_fps }),
+            .none => try w.print("{s}\r\n", .{i18n.trSlice("尚未执行测试。", "No test executed yet.", "まだテストは実行されていません。")}),
         }
-        try w.print("摘要: {s}\r\n", .{snap.summarySlice()});
+        try w.print("{s}: {s}\r\n", .{ i18n.trSlice("摘要", "Summary", "概要"), snap.summarySlice() });
         return out.toOwnedSlice(allocator);
     }
 };
@@ -464,17 +497,25 @@ fn cpuStressMain(self: *BenchmarkRunner, threads: u32, duration_s: u32) void {
     self.snap.error_count = final_errs;
     if (self.thermal_trip_flag.load(.acquire)) {
         self.snap.outcome = .stopped_by_thermal;
-        setSummary(&self.snap, "触发高温熔断阈值，已自动停止 CPU 烤机");
+        setSummary(&self.snap, i18n.trSlice("触发高温熔断阈值，已自动停止 CPU 烤机", "Thermal cutoff triggered; CPU stress stopped", "高温保護閾値に到達し CPU テストを自動停止しました"));
     } else if (self.cancel_flag.load(.acquire)) {
         self.snap.outcome = .stopped_by_user;
-        setSummary(&self.snap, "用户已手动停止 CPU 测试");
+        setSummary(&self.snap, i18n.trSlice("用户已手动停止 CPU 测试", "CPU stress stopped by user", "ユーザーにより CPU テストを停止しました"));
     } else if (final_errs > 0) {
         self.snap.outcome = .failed_errors;
-        setSummary(&self.snap, "检出确定性计算核校验偏差，请检查 CPU 电压/散热/超频稳定性");
+        setSummary(&self.snap, i18n.trSlice(
+            "检出确定性计算核校验偏差，请检查 CPU 电压/散热/超频稳定性",
+            "Deterministic kernel mismatch detected; check CPU voltage/cooling/OC",
+            "演算検証エラーを検出しました。CPU 電圧/冷却/OC 設定を確認してください",
+        ));
     } else {
         self.snap.progress_pct = 100.0;
         self.snap.outcome = .passed;
-        setSummary(&self.snap, "CPU 多线程稳定性与算力校验全部通过（零计算错误）");
+        setSummary(&self.snap, i18n.trSlice(
+            "CPU 多线程稳定性与算力校验全部通过（零计算错误）",
+            "CPU multi-threaded stability & compute passed (0 errors)",
+            "CPU マルチスレッド安定性・演算検証に合格しました（エラー 0）",
+        ));
     }
     self.mutex.unlock();
 }
@@ -488,7 +529,7 @@ fn memoryVerifyMain(self: *BenchmarkRunner, size_mb: u32) void {
         self.mutex.lock();
         self.snap.active_kind = .none;
         self.snap.outcome = .failed_io;
-        setSummary(&self.snap, "内存分配失败，请调小测试容量");
+        setSummary(&self.snap, i18n.trSlice("内存分配失败，请调小测试容量", "Memory allocation failed; reduce test size", "メモリ確保に失敗しました。テスト容量を下げてください"));
         self.mutex.unlock();
         return;
     };
@@ -541,17 +582,25 @@ fn memoryVerifyMain(self: *BenchmarkRunner, size_mb: u32) void {
     self.snap.active_kind = .none;
     if (self.thermal_trip_flag.load(.acquire)) {
         self.snap.outcome = .stopped_by_thermal;
-        setSummary(&self.snap, "触发高温熔断，已终止内存校验");
+        setSummary(&self.snap, i18n.trSlice("触发高温熔断，已终止内存校验", "Thermal cutoff triggered; memory test stopped", "高温保護によりメモリ検証を停止しました"));
     } else if (self.cancel_flag.load(.acquire)) {
         self.snap.outcome = .stopped_by_user;
-        setSummary(&self.snap, "用户已手动停止内存校验");
+        setSummary(&self.snap, i18n.trSlice("用户已手动停止内存校验", "Memory verification stopped by user", "ユーザーによりメモリ検証を停止しました"));
     } else if (errors > 0) {
         self.snap.outcome = .failed_errors;
-        setSummary(&self.snap, "检测到内存位翻转错误！请检查内存条 XMP 频率或插槽接触");
+        setSummary(&self.snap, i18n.trSlice(
+            "检测到内存位翻转错误！请检查内存条 XMP 频率或插槽接触",
+            "Memory bit-flip error detected! Check RAM XMP/timings or seating",
+            "メモリビット反転エラーを検出！XMP 設定やスロット接触を確認してください",
+        ));
     } else {
         self.snap.progress_pct = 100.0;
         self.snap.outcome = .passed;
-        setSummary(&self.snap, "4 轮内存位模式校验全部通过（零位翻转错误）");
+        setSummary(&self.snap, i18n.trSlice(
+            "4 轮内存位模式校验全部通过（零位翻转错误）",
+            "All 4 memory bit-pattern passes passed (0 bit errors)",
+            "4パス メモリパターン検証に全合格しました（ビットエラー 0）",
+        ));
     }
     self.mutex.unlock();
 }
@@ -571,12 +620,147 @@ inline fn patternWord(pat: u8, idx: usize) u64 {
     };
 }
 
+/// Windows 无系统缓存直通磁盘测速（FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH + 4K 对齐缓冲），
+/// 绕过 Windows 内存文件缓存，测得真实物理 SSD/HDD 顺序与 4K 随机读写成绩。
+fn runWindowsUnbufferedDiskBench(self: *BenchmarkRunner, file_path: []const u8, file_mb: u32, chunk: []const u8, start_ns: i128) bool {
+    if (builtin.os.tag != .windows) return false;
+    var path_w: [512]u16 = undefined;
+    const wlen = std.unicode.utf8ToUtf16Le(path_w[0 .. path_w.len - 1], file_path) catch return false;
+    path_w[wlen] = 0;
+
+    // 1. Unbuffered SEQ1M Write
+    {
+        const h = win32.CreateFileW(
+            @ptrCast(&path_w),
+            win32.GENERIC_WRITE,
+            0,
+            null,
+            win32.CREATE_ALWAYS,
+            win32.FILE_FLAG_NO_BUFFERING | win32.FILE_FLAG_WRITE_THROUGH,
+            null,
+        );
+        if (h == win32.INVALID_HANDLE_VALUE) return false;
+        defer _ = win32.CloseHandle(h);
+
+        const tw0 = std.time.nanoTimestamp();
+        for (0..file_mb) |mb_i| {
+            if (self.cancel_flag.load(.acquire)) break;
+            var written: win32.DWORD = 0;
+            if (win32.WriteFile(h, chunk.ptr, @intCast(chunk.len), &written, null) == 0 or written != chunk.len) {
+                markDiskFail(self, i18n.trSlice("顺序写入测试失败（磁盘空间不足或被中断）", "Sequential write failed (disk full or interrupted)", "シーケンシャル書込テスト失敗（容量不足または中断）"));
+                return true;
+            }
+            self.mutex.lock();
+            self.snap.progress_pct = (@as(f32, @floatFromInt(mb_i + 1)) / @as(f32, @floatFromInt(file_mb))) * 35.0;
+            self.mutex.unlock();
+        }
+        _ = win32.FlushFileBuffers(h);
+        const tw1 = std.time.nanoTimestamp();
+        const ws = @max(0.001, @as(f64, @floatFromInt(tw1 - tw0)) / @as(f64, @floatFromInt(std.time.ns_per_s)));
+        self.mutex.lock();
+        self.snap.disk_seq_write_mbs = @as(f64, @floatFromInt(file_mb)) / ws;
+        self.mutex.unlock();
+    }
+
+    if (self.cancel_flag.load(.acquire)) {
+        finishDiskCancelled(self, start_ns);
+        return true;
+    }
+
+    // 2. Unbuffered SEQ1M Read + 3. Unbuffered RND4K Read
+    {
+        const h = win32.CreateFileW(
+            @ptrCast(&path_w),
+            win32.GENERIC_READ,
+            win32.FILE_SHARE_READ,
+            null,
+            win32.OPEN_EXISTING,
+            win32.FILE_FLAG_NO_BUFFERING,
+            null,
+        );
+        if (h == win32.INVALID_HANDLE_VALUE) return false;
+        defer _ = win32.CloseHandle(h);
+
+        const read_buf = self.allocator.alignedAlloc(u8, .fromByteUnits(4096), chunk.len) catch return false;
+        defer self.allocator.free(read_buf);
+
+        const tr0 = std.time.nanoTimestamp();
+        var total_read: usize = 0;
+        for (0..file_mb) |mb_i| {
+            if (self.cancel_flag.load(.acquire)) break;
+            var got: win32.DWORD = 0;
+            if (win32.ReadFile(h, read_buf.ptr, @intCast(read_buf.len), &got, null) == 0) {
+                markDiskFail(self, i18n.trSlice("顺序读取测试失败", "Sequential read failed", "シーケンシャル読込テスト失敗"));
+                return true;
+            }
+            total_read += got;
+            self.mutex.lock();
+            self.snap.progress_pct = 35.0 + (@as(f32, @floatFromInt(mb_i + 1)) / @as(f32, @floatFromInt(file_mb))) * 35.0;
+            self.mutex.unlock();
+        }
+        const tr1 = std.time.nanoTimestamp();
+        const rs = @max(0.001, @as(f64, @floatFromInt(tr1 - tr0)) / @as(f64, @floatFromInt(std.time.ns_per_s)));
+        self.mutex.lock();
+        self.snap.disk_seq_read_mbs = (@as(f64, @floatFromInt(total_read)) / (1024.0 * 1024.0)) / rs;
+        self.mutex.unlock();
+
+        if (self.cancel_flag.load(.acquire)) {
+            finishDiskCancelled(self, start_ns);
+            return true;
+        }
+
+        // 3. Unbuffered RND4K Read (2048 random 4 KB page-aligned blocks)
+        var blk4k: [4096]u8 align(4096) = undefined;
+        const max_blocks: u64 = (@as(u64, file_mb) * 1024 * 1024) / 4096;
+        const ops: usize = 2048;
+        var rng_state: u64 = 0x13579BDF2468ACE0;
+        const tk0 = std.time.nanoTimestamp();
+        var ops_done: usize = 0;
+        for (0..ops) |oi| {
+            if (self.cancel_flag.load(.acquire)) break;
+            rng_state = rng_state *% 6364136223846793005 +% 1;
+            const blk_idx = (rng_state >> 16) % max_blocks;
+            const off: i64 = @intCast(blk_idx * 4096);
+            if (win32.SetFilePointerEx(h, off, null, win32.FILE_BEGIN) == 0) break;
+            var got: win32.DWORD = 0;
+            if (win32.ReadFile(h, &blk4k, 4096, &got, null) == 0 or got != 4096) break;
+            ops_done += 1;
+            if ((oi & 63) == 0) {
+                self.mutex.lock();
+                self.snap.progress_pct = 70.0 + (@as(f32, @floatFromInt(oi + 1)) / @as(f32, @floatFromInt(ops))) * 30.0;
+                self.mutex.unlock();
+            }
+        }
+        const tk1 = std.time.nanoTimestamp();
+        const ks = @max(0.0001, @as(f64, @floatFromInt(tk1 - tk0)) / @as(f64, @floatFromInt(std.time.ns_per_s)));
+        const iops = @as(f64, @floatFromInt(ops_done)) / ks;
+        const mbs_4k = (@as(f64, @floatFromInt(ops_done)) * 4096.0 / (1024.0 * 1024.0)) / ks;
+        const lat_us = if (ops_done > 0) (ks * 1_000_000.0) / @as(f64, @floatFromInt(ops_done)) else 0.0;
+
+        self.mutex.lock();
+        self.snap.disk_rnd4k_read_iops = iops;
+        self.snap.disk_rnd4k_read_mbs = mbs_4k;
+        self.snap.disk_rnd4k_avg_lat_us = lat_us;
+        self.snap.elapsed_s = @as(f64, @floatFromInt(tk1 - start_ns)) / @as(f64, @floatFromInt(std.time.ns_per_s));
+        self.snap.active_kind = .none;
+        self.snap.progress_pct = 100.0;
+        self.snap.outcome = .passed;
+        setSummary(&self.snap, i18n.trSlice(
+            "无缓存直通磁盘读写基准完成，临时文件已自动清理",
+            "Unbuffered physical disk benchmark passed; temp file auto-deleted",
+            "キャッシュ無効ディスクベンチマーク完了（一時ファイル自動削除済）",
+        ));
+        self.mutex.unlock();
+    }
+    return true;
+}
+
 fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
     defer self.allocator.free(temp_dir);
     const start_ns = std.time.nanoTimestamp();
 
     const file_path = std.fs.path.join(self.allocator, &.{ temp_dir, "winhw_monitor_bench_tmp.bin" }) catch {
-        markDiskFail(self, "无法拼接临时测试文件路径");
+        markDiskFail(self, i18n.trSlice("无法拼接临时测试文件路径", "Failed to compose temp file path", "一時ファイルパスの作成に失敗"));
         return;
     };
     defer self.allocator.free(file_path);
@@ -584,9 +768,9 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
     // 无论成功、取消还是异常，退出前绝对删除临时测试文件
     defer std.fs.deleteFileAbsolute(file_path) catch {};
 
-    const chunk_size: usize = 1024 * 1024; // 1 MiB
-    const chunk = self.allocator.alloc(u8, chunk_size) catch {
-        markDiskFail(self, "缓冲区分配失败");
+    const chunk_size: usize = 1024 * 1024; // 1 MiB (4K aligned for unbuffered I/O)
+    const chunk = self.allocator.alignedAlloc(u8, .fromByteUnits(4096), chunk_size) catch {
+        markDiskFail(self, i18n.trSlice("缓冲区分配失败", "Buffer allocation failed", "バッファ確保に失敗"));
         return;
     };
     defer self.allocator.free(chunk);
@@ -598,10 +782,17 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
         b.* = @truncate(prng_s >> 56);
     }
 
-    // 1. SEQ1M Write
+    // Windows 优先使用 FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH 绕过 OS RAM 缓存
+    if (builtin.os.tag == .windows) {
+        if (runWindowsUnbufferedDiskBench(self, file_path, file_mb, chunk, start_ns)) {
+            return;
+        }
+    }
+
+    // 1. SEQ1M Write (Linux posix_fadvise 或 Windows 降级路径)
     {
         const f = std.fs.createFileAbsolute(file_path, .{ .truncate = true }) catch {
-            markDiskFail(self, "无法在目标目录创建临时测试文件，请检查目录写权限");
+            markDiskFail(self, i18n.trSlice("无法在目标目录创建临时测试文件，请检查目录写权限", "Cannot create temp file; check directory permissions", "一時ファイル作成不可（ディレクトリ書込権限を確認）"));
             return;
         };
         defer f.close();
@@ -610,7 +801,7 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
         for (0..file_mb) |mb_i| {
             if (self.cancel_flag.load(.acquire)) break;
             f.writeAll(chunk) catch {
-                markDiskFail(self, "顺序写入测试失败（磁盘空间不足或被中断）");
+                markDiskFail(self, i18n.trSlice("顺序写入测试失败（磁盘空间不足或被中断）", "Sequential write failed (disk full or interrupted)", "シーケンシャル書込テスト失敗（容量不足または中断）"));
                 return;
             };
             self.mutex.lock();
@@ -637,7 +828,7 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
     // 2. SEQ1M Read + 3. RND4K Read
     {
         const f = std.fs.openFileAbsolute(file_path, .{}) catch {
-            markDiskFail(self, "无法重新打开临时文件执行读取测试");
+            markDiskFail(self, i18n.trSlice("无法重新打开临时文件执行读取测试", "Failed to reopen temp file for read test", "読込テスト用一時ファイルの再オープンに失敗"));
             return;
         };
         defer f.close();
@@ -647,7 +838,7 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
         for (0..file_mb) |mb_i| {
             if (self.cancel_flag.load(.acquire)) break;
             const n = f.readAll(chunk) catch {
-                markDiskFail(self, "顺序读取测试失败");
+                markDiskFail(self, i18n.trSlice("顺序读取测试失败", "Sequential read failed", "シーケンシャル読込テスト失敗"));
                 return;
             };
             total_read += n;
@@ -700,7 +891,11 @@ fn diskBenchMain(self: *BenchmarkRunner, file_mb: u32, temp_dir: []u8) void {
         self.snap.active_kind = .none;
         self.snap.progress_pct = 100.0;
         self.snap.outcome = .passed;
-        setSummary(&self.snap, "磁盘文件级读写基准测试完成，临时文件已自动清理");
+        setSummary(&self.snap, i18n.trSlice(
+            "磁盘文件级读写基准测试完成，临时文件已自动清理",
+            "Disk file-level benchmark completed; temp file auto-deleted",
+            "ディスクベンチマーク完了（一時ファイル自動削除済）",
+        ));
         self.mutex.unlock();
     }
 }
@@ -718,7 +913,11 @@ fn finishDiskCancelled(self: *BenchmarkRunner, start_ns: i128) void {
     self.snap.active_kind = .none;
     self.snap.elapsed_s = @as(f64, @floatFromInt(std.time.nanoTimestamp() - start_ns)) / @as(f64, @floatFromInt(std.time.ns_per_s));
     self.snap.outcome = if (self.thermal_trip_flag.load(.acquire)) .stopped_by_thermal else .stopped_by_user;
-    setSummary(&self.snap, "磁盘基准测试已中止，临时文件已自动清理");
+    setSummary(&self.snap, i18n.trSlice(
+        "磁盘基准测试已中止，临时文件已自动清理",
+        "Disk benchmark aborted; temp file auto-deleted",
+        "ディスクベンチマークを中止しました（一時ファイル削除済）",
+    ));
     self.mutex.unlock();
 }
 

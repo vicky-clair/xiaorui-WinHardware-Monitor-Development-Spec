@@ -5,12 +5,13 @@ const AppState = state_mod.AppState;
 const Page = state_mod.Page;
 const theme = @import("theme.zig");
 const widgets = @import("widgets.zig");
+const i18n = @import("../core/i18n.zig");
 
-/// 左侧导航栏（支持深色/浅色一键切换、底部状态自适应不裁切）
+/// 左侧导航栏（支持中/英/日一键切换、深色/浅色一键切换、底部状态自适应不裁切）
 pub fn renderSidebar(state: *AppState, height: f32) void {
     const s = state.dpi_scale;
     const p = theme.active();
-    const sidebar_w = 220.0 * s;
+    const sidebar_w = 224.0 * s;
 
     zgui.pushStyleColor4f(.{ .idx = .child_bg, .c = p.sidebar_bg });
     zgui.pushStyleColor4f(.{ .idx = .border, .c = p.divider });
@@ -30,7 +31,11 @@ pub fn renderSidebar(state: *AppState, height: f32) void {
         zgui.textColored(p.text_primary, "WinHardware", .{});
         zgui.popFont();
         zgui.pushFont(null, 12.0 * s);
-        zgui.textColored(p.text_muted, "硬件温度与磁盘健康监控", .{});
+        zgui.textColored(p.text_muted, "{s}", .{i18n.tr(
+            "硬件温度与磁盘健康监控",
+            "Thermal & Disk Health Monitor",
+            "温度・ディスク健康監視",
+        )});
         zgui.popFont();
 
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
@@ -61,7 +66,7 @@ pub fn renderSidebar(state: *AppState, height: f32) void {
         }
 
         // 底部状态区（根据剩余空间弹性贴底，空间不足时自然跟排可滚动，绝不裁切）
-        const bottom_h = (if (state.is_admin) @as(f32, 162.0) else @as(f32, 198.0)) * s;
+        const bottom_h = (if (state.is_admin) @as(f32, 196.0) else @as(f32, 232.0)) * s;
         const avail_y = zgui.getContentRegionAvail()[1];
         if (avail_y > bottom_h + 8.0 * s) {
             zgui.dummy(.{ .w = 0, .h = avail_y - bottom_h });
@@ -72,26 +77,48 @@ pub fn renderSidebar(state: *AppState, height: f32) void {
         zgui.separator();
         zgui.dummy(.{ .w = 0, .h = 8.0 * s });
 
+        // 一键循环切换语言（简体中文 / English / 日本語）并自动持久化
+        var lang_buf: [64]u8 = undefined;
+        const lang_btn = std.fmt.bufPrintZ(&lang_buf, "{s}: {s}##lang_cycle", .{
+            i18n.tr("语言", "Lang", "言語"),
+            state.language.nativeName(),
+        }) catch state.language.nativeName();
+        if (zgui.button(lang_btn, .{ .w = -1.0, .h = 26.0 * s })) {
+            state.language = state.language.next();
+            i18n.setLanguage(state.language);
+            state.request_save_config = true;
+        }
+
+        zgui.dummy(.{ .w = 0, .h = 4.0 * s });
+
         // 一键切换深色 / 浅色（黑白）主题并立即持久化
-        const toggle_lbl: [:0]const u8 = if (state.theme_mode == .dark) "切换浅色主题 (白)" else "切换深色主题 (黑)";
-        if (zgui.button(toggle_lbl, .{ .w = -1.0, .h = 28.0 * s })) {
+        const toggle_lbl: [:0]const u8 = if (state.theme_mode == .dark)
+            i18n.tr("切换浅色主题 (白)", "Light Theme", "ライトテーマ")
+        else
+            i18n.tr("切换深色主题 (黑)", "Dark Theme", "ダークテーマ");
+        if (zgui.button(toggle_lbl, .{ .w = -1.0, .h = 26.0 * s })) {
             state.theme_mode = if (state.theme_mode == .dark) .light else .dark;
             state.request_save_config = true;
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         widgets.drawStatusPill(
-            if (state.is_admin) "管理员模式" else "普通用户模式",
+            if (state.is_admin)
+                i18n.tr("管理员模式", "Administrator", "管理者モード")
+            else
+                i18n.tr("普通用户模式", "Standard User", "標準ユーザー"),
             if (state.is_admin) p.status_ok else p.status_caution,
             s,
         );
 
         zgui.dummy(.{ .w = 0, .h = 4.0 * s });
         zgui.pushFont(null, 12.0 * s);
-        zgui.textWrapped("渲染: {s}", .{state.render_mode.labelZh()});
-        zgui.textColored(p.text_muted, "采集: {s} | 扩展: {s}", .{
-            if (state.monitoring_paused) "暂停" else "运行",
-            if (state.extension_enabled) "开" else "关",
+        zgui.textWrapped("{s}: {s}", .{ i18n.tr("渲染", "Render", "描画"), state.render_mode.labelZh() });
+        zgui.textColored(p.text_muted, "{s}: {s} | {s}: {s}", .{
+            i18n.tr("采集", "Poll", "監視"),
+            if (state.monitoring_paused) i18n.tr("暂停", "Paused", "一時停止") else i18n.tr("运行", "Live", "稼働中"),
+            i18n.tr("扩展", "Ext", "拡張"),
+            if (state.extension_enabled) i18n.tr("开", "On", "オン") else i18n.tr("关", "Off", "オフ"),
         });
         zgui.popFont();
 
@@ -100,7 +127,7 @@ pub fn renderSidebar(state: *AppState, height: f32) void {
             zgui.pushStyleColor4f(.{ .idx = .button, .c = p.accent_blue_soft });
             zgui.pushStyleColor4f(.{ .idx = .button_hovered, .c = p.accent_blue_hover });
             zgui.pushStyleColor4f(.{ .idx = .text, .c = p.accent_blue });
-            if (zgui.button("以管理员身份重启", .{ .w = -1.0, .h = 30.0 * s })) {
+            if (zgui.button(i18n.tr("以管理员身份重启", "Restart as Admin", "管理者として再起動"), .{ .w = -1.0, .h = 30.0 * s })) {
                 state.request_relaunch_admin = true;
             }
             zgui.popStyleColor(.{ .count = 3 });

@@ -1,6 +1,7 @@
 const std = @import("std");
 const toml = @import("../utils/toml.zig");
 const state_mod = @import("../app/state.zig");
+const i18n = @import("../core/i18n.zig");
 
 /// 完整应用配置（对应 config/default.toml 与规范 §2.6 / §5.3 / §8）
 pub const AppConfig = struct {
@@ -177,6 +178,8 @@ pub const AppConfig = struct {
     }
 
     pub fn applyToState(self: *const AppConfig, st: *state_mod.AppState) void {
+        st.language = i18n.Language.fromCode(self.language[0..self.language_len]);
+        i18n.setLanguage(st.language);
         st.theme_mode = self.theme_mode;
         st.close_behavior = self.close_behavior;
         st.minimize_behavior = self.minimize_behavior;
@@ -186,6 +189,10 @@ pub const AppConfig = struct {
     }
 
     pub fn syncFromState(self: *AppConfig, st: *const state_mod.AppState) void {
+        const code = st.language.code();
+        const n = @min(self.language.len, code.len);
+        @memcpy(self.language[0..n], code[0..n]);
+        self.language_len = n;
         self.theme_mode = st.theme_mode;
         self.close_behavior = st.close_behavior;
         self.minimize_behavior = st.minimize_behavior;
@@ -214,8 +221,10 @@ fn clampI32(val: i64, lo: i32, hi: i32) i32 {
     return @intCast(val);
 }
 
-test "AppConfig round-trip serialization and safe SMART interval clamping" {
+test "AppConfig round-trip serialization, trilingual language persistence, and safe SMART interval clamping" {
     var cfg = AppConfig{};
+    cfg.language = initFixed(16, "ja-JP");
+    cfg.language_len = 5;
     cfg.theme_mode = .light;
     cfg.temp_unit = .fahrenheit;
     cfg.close_behavior = .exit_app;
@@ -227,12 +236,22 @@ test "AppConfig round-trip serialization and safe SMART interval clamping" {
     defer std.testing.allocator.free(text);
 
     const parsed = AppConfig.fromToml(std.testing.allocator, text);
+    try std.testing.expectEqualStrings("ja-JP", parsed.language[0..parsed.language_len]);
+    try std.testing.expectEqual(i18n.Language.ja_jp, i18n.Language.fromCode(parsed.language[0..parsed.language_len]));
     try std.testing.expectEqual(state_mod.ThemeMode.light, parsed.theme_mode);
     try std.testing.expectEqual(state_mod.TemperatureUnit.fahrenheit, parsed.temp_unit);
     try std.testing.expectEqual(state_mod.CloseBehavior.exit_app, parsed.close_behavior);
     try std.testing.expectEqual(@as(u32, 1000), parsed.system_interval_ms);
     try std.testing.expectEqual(@as(u32, 120000), parsed.smart_interval_ms);
     try std.testing.expectEqual(@as(i32, 95), parsed.cpu_warning_c);
+
+    // 验证 en-US 同步到 AppState 后再回写
+    var st = state_mod.AppState{};
+    st.language = .en_us;
+    var cfg_en = AppConfig{};
+    cfg_en.syncFromState(&st);
+    try std.testing.expectEqualStrings("en-US", cfg_en.language[0..cfg_en.language_len]);
+    i18n.setLanguage(.zh_cn);
 
     // 规范 §5.3：SMART 最短采集间隔不得低于 30 秒
     const too_fast = AppConfig.fromToml(std.testing.allocator, "[polling]\nsmart_interval_ms = 5000\n");

@@ -2,6 +2,7 @@ const std = @import("std");
 const sensor = @import("sensor.zig");
 const HealthLevel = sensor.HealthLevel;
 const health_rules = @import("health_rules.zig");
+const i18n = @import("i18n.zig");
 
 /// 规范 §8 告警引擎：
 /// - 温度持续时间防抖（默认 30 秒，避免瞬时尖峰误报）
@@ -131,8 +132,14 @@ pub const AlertEngine = struct {
                         target_level,
                         false,
                         now_utc_ms,
-                        "{s} 温度 {d:.1}°C 持续超过阈值 {d:.0}°C ({d}s)",
-                        .{ device_label, temp_c, thr, self.cfg.duration_s },
+                        "{s} {s} {d:.1}°C >= {d:.0}°C ({d}s)",
+                        .{
+                            device_label,
+                            i18n.trSlice("温度持续超限", "temperature exceeded threshold", "温度が閾値を超過"),
+                            temp_c,
+                            thr,
+                            self.cfg.duration_s,
+                        },
                     );
                     self.pushHistory(ev);
                     self.pending_notify = ev;
@@ -153,8 +160,13 @@ pub const AlertEngine = struct {
                             .normal,
                             true,
                             now_utc_ms,
-                            "{s} 温度已恢复正常（当前 {d:.1}°C，回差阈值 {d:.0}°C）",
-                            .{ device_label, temp_c, caution_c - self.cfg.hysteresis_c },
+                            "{s} {s} ({d:.1}°C <= {d:.0}°C)",
+                            .{
+                                device_label,
+                                i18n.trSlice("温度已恢复正常", "temperature recovered", "温度が正常に回復"),
+                                temp_c,
+                                caution_c - self.cfg.hysteresis_c,
+                            },
                         );
                         self.pushHistory(ev);
                         self.pending_notify = ev;

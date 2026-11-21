@@ -17,6 +17,7 @@ const ata_smart = @import("collectors/storage/ata_smart.zig");
 const health_rules = @import("core/health_rules.zig");
 const benchmarks = @import("core/benchmarks.zig");
 const paths_mod = @import("platform/paths.zig");
+const i18n = @import("core/i18n.zig");
 
 pub const CliOptions = struct {
     show_info: bool = false,
@@ -35,7 +36,15 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
     defer w.flush() catch {};
 
     try w.print("============================================================\n", .{});
-    try w.print("WinHardware Monitor V2.0 — 跨平台硬件检测与测试 CLI ({s})\n", .{@tagName(builtin.os.tag)});
+    try w.print("{s} ({s} | {s})\n", .{
+        i18n.trSlice(
+            "WinHardware Monitor V2.0 — 跨平台硬件检测与测试 CLI",
+            "WinHardware Monitor V2.0 — Cross-Platform Hardware CLI",
+            "WinHardware Monitor V2.0 — ハードウェア監視・テスト CLI",
+        ),
+        @tagName(builtin.os.tag),
+        i18n.current().nativeName(),
+    });
     try w.print("============================================================\n", .{});
 
     // 1. 采集真实系统、传感器、GPU 与物理磁盘信息
@@ -53,48 +62,62 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
     else
         @import("providers/libre_hardware_monitor/client.zig").ExtensionSnapshot{};
 
-    try w.print("\n[处理器 CPU]\n", .{});
-    try w.print("  型号: {s}\n", .{sys.cpuNameSlice()});
-    try w.print("  逻辑核心: {d} | 使用率: {?d:.1}% ({s}) | 频率: {?d:.0} MHz ({s})\n", .{
+    try w.print("\n[{s}]\n", .{i18n.trSlice("处理器 CPU", "Processor (CPU)", "プロセッサ (CPU)")});
+    try w.print("  {s}: {s}\n", .{ i18n.trSlice("型号", "Model", "モデル"), sys.cpuNameSlice() });
+    try w.print("  {s}: {d} | {s}: {?d:.1}% ({s}) | {s}: {?d:.0} MHz ({s})\n", .{
+        i18n.trSlice("逻辑核心", "Logical Cores", "論理コア"),
         sys.logical_cores,
+        i18n.trSlice("使用率", "Usage", "使用率"),
         sys.cpu_usage_pct,
         sys.cpu_usage_source,
+        i18n.trSlice("频率", "Clock", "クロック"),
         sys.cpu_clock_mhz,
         sys.cpu_clock_source,
     });
     if (hwmon_snap.cpu_package_temp_c) |ct| {
-        try w.print("  CPU 封装温度: {d:.1} °C (原生内核 hwmon)\n", .{ct});
+        try w.print("  {s}: {d:.1} °C (hwmon)\n", .{ i18n.trSlice("CPU 封装温度", "CPU Package Temp", "CPU パッケージ温度"), ct });
     } else {
-        try w.print("  CPU 封装温度: N/A\n", .{});
+        try w.print("  {s}: N/A\n", .{i18n.trSlice("CPU 封装温度", "CPU Package Temp", "CPU パッケージ温度")});
     }
 
-    try w.print("\n[内存与主板]\n", .{});
+    try w.print("\n[{s}]\n", .{i18n.trSlice("内存与主板", "Memory & Motherboard", "メモリ・マザーボード")});
     const used_mb = sys.mem_used_bytes / (1024 * 1024);
     const total_mb = sys.mem_total_bytes / (1024 * 1024);
-    try w.print("  物理内存: {d} / {d} MB ({?d:.1}%)\n", .{ used_mb, total_mb, sys.mem_load_pct });
+    try w.print("  {s}: {d} / {d} MB ({?d:.1}%)\n", .{ i18n.trSlice("物理内存", "Physical Memory", "物理メモリ"), used_mb, total_mb, sys.mem_load_pct });
     if (sys.smbios_info.available) {
-        try w.print("  主板: {s} {s} ({s})\n", .{
+        try w.print("  {s}: {s} {s} ({s})\n", .{
+            i18n.trSlice("主板", "Motherboard", "マザーボード"),
             sys.smbios_info.boardManufacturer(),
             sys.smbios_info.boardProduct(),
             sys.smbios_info.boardVersion(),
         });
     }
-    try w.print("  系统已运行: {d} 秒 | 实时磁盘吞吐: 读 {?d:.1} MB/s / 写 {?d:.1} MB/s ({?d:.0} IOPS)\n", .{
+    try w.print("  {s}: {d}s | {s}: R {?d:.1} MB/s / W {?d:.1} MB/s ({?d:.0} IOPS)\n", .{
+        i18n.trSlice("系统运行时间", "Uptime", "稼働時間"),
         sys.uptime_seconds,
+        i18n.trSlice("实时磁盘 I/O", "Live Disk I/O", "リアルタイム Disk I/O"),
         sys.disk_read_mbs,
         sys.disk_write_mbs,
         sys.disk_iops,
     });
 
-    try w.print("\n[显卡 GPU ({d} 个)]\n", .{gpu.count});
+    try w.print("\n[{s} ({d})]\n", .{ i18n.trSlice("显卡 GPU", "Graphics (GPU)", "グラフィック (GPU)"), gpu.count });
     for (gpu.slice(), 0..) |g, gi| {
-        try w.print("  GPU #{d}: {s} | 温度: {?d:.1} °C ({s}) | 功耗: {?d:.1} W | 风扇: {?d} RPM\n", .{
-            gi, g.nameSlice(), g.temp_c, g.temp_status.labelZh(), g.power_watts, g.fan_rpm,
+        try w.print("  GPU #{d}: {s} | {s}: {?d:.1} °C ({s}) | {s}: {?d:.1} W | {s}: {?d} RPM\n", .{
+            gi,
+            g.nameSlice(),
+            i18n.trSlice("温度", "Temp", "温度"),
+            g.temp_c,
+            g.temp_status.labelZh(),
+            i18n.trSlice("功耗", "Power", "電力"),
+            g.power_watts,
+            i18n.trSlice("风扇", "Fan", "ファン"),
+            g.fan_rpm,
         });
     }
 
     if (hwmon_snap.sensor_count > 0) {
-        try w.print("\n[内核 hwmon 传感器 ({d} 项)]\n", .{hwmon_snap.sensor_count});
+        try w.print("\n[{s} ({d})]\n", .{ i18n.trSlice("内核 hwmon 传感器", "Kernel hwmon Sensors", "カーネル hwmon センサー"), hwmon_snap.sensor_count });
         for (hwmon_snap.sensors[0..hwmon_snap.sensor_count]) |s| {
             try w.print("  - {s} / {s} ({s}): {d:.1} {s}\n", .{
                 s.hardwareSlice(), s.nameSlice(), s.sensorTypeSlice(), s.value, s.unitSlice(),
@@ -104,7 +127,7 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
 
     // 2. 枚举物理磁盘 + SMART + 21 条健康规则评估
     const inv = storage_enum.enumeratePhysicalDisks();
-    try w.print("\n[物理磁盘与 SMART 健康 ({d} 块)]\n", .{inv.count});
+    try w.print("\n[{s} ({d})]\n", .{ i18n.trSlice("物理磁盘与 SMART 健康", "Physical Disks & SMART Health", "物理ディスク・SMART 健康状態"), inv.count });
     const thr = health_rules.RuleThresholds{};
     for (inv.slice()) |d| {
         var mb: [160]u8 = undefined;
@@ -116,8 +139,19 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
             if (nv.status == .ok) {
                 const bl = health_rules.DiskBaseline.captureFromNvme(&nv);
                 const ass = health_rules.evaluateNvme(&nv, &bl, thr);
-                try w.print("  Disk {d}: {s} ({d:.1} GB, {s}, ID={s}) | 健康={s} | 温度={?d}°C | 磨损={d}% | 通电={d}h\n", .{
-                    d.drive_index, model, cap_gb, d.bus_type.name(), d.stable_id.slice(), ass.overall.labelZh(), nv.composite_temp_c, nv.percentage_used, nv.power_on_hours,
+                try w.print("  Disk {d}: {s} ({d:.1} GB, {s}, ID={s}) | {s}={s} | {s}={?d}°C | {s}={d}% | POH={d}h\n", .{
+                    d.drive_index,
+                    model,
+                    cap_gb,
+                    d.bus_type.name(),
+                    d.stable_id.slice(),
+                    i18n.trSlice("健康", "Health", "健康"),
+                    ass.overall.labelZh(),
+                    i18n.trSlice("温度", "Temp", "温度"),
+                    nv.composite_temp_c,
+                    i18n.trSlice("磨损", "Used", "消耗"),
+                    nv.percentage_used,
+                    nv.power_on_hours,
                 });
             } else {
                 try w.print("  Disk {d}: {s} ({d:.1} GB, {s}, ID={s}) | SMART={s} (err={?d})\n", .{
@@ -129,11 +163,21 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
             if (ad.status == .ok) {
                 const bl = health_rules.DiskBaseline.captureFromAta(&ad);
                 const ass = health_rules.evaluateAta(&ad, &bl, thr);
-                try w.print("  Disk {d}: {s} ({d:.1} GB, {s}, ID={s}) | 健康={s} | 温度={?d}°C | 属性={d}项 | 通电={?d}h\n", .{
-                    d.drive_index, model, cap_gb, d.bus_type.name(), d.stable_id.slice(), ass.overall.labelZh(), ad.temperatureCelsius(), ad.attr_count, ad.powerOnHours(),
+                try w.print("  Disk {d}: {s} ({d:.1} GB, {s}, ID={s}) | {s}={s} | {s}={?d}°C | Attrs={d} | POH={?d}h\n", .{
+                    d.drive_index,
+                    model,
+                    cap_gb,
+                    d.bus_type.name(),
+                    d.stable_id.slice(),
+                    i18n.trSlice("健康", "Health", "健康"),
+                    ass.overall.labelZh(),
+                    i18n.trSlice("温度", "Temp", "温度"),
+                    ad.temperatureCelsius(),
+                    ad.attr_count,
+                    ad.powerOnHours(),
                 });
                 for (ass.slice()) |h| {
-                    try w.print("    ! 规则命中 [{s}] {s}\n", .{ h.rule_id, h.evidenceSlice() });
+                    try w.print("    ! [{s}] {s}\n", .{ h.rule_id, h.evidenceSlice() });
                 }
             } else {
                 try w.print("  Disk {d}: {s} ({d:.1} GB, {s}, ID={s}) | SMART={s} (err={?d})\n", .{
@@ -141,8 +185,14 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
                 });
             }
         } else {
-            try w.print("  Disk {d}: {s} ({d:.1} GB, {s}) | 健康=未知 ({s})\n", .{
-                d.drive_index, model, cap_gb, d.bus_type.name(), d.support.labelZh(),
+            try w.print("  Disk {d}: {s} ({d:.1} GB, {s}) | {s}={s} ({s})\n", .{
+                d.drive_index,
+                model,
+                cap_gb,
+                d.bus_type.name(),
+                i18n.trSlice("健康", "Health", "健康"),
+                i18n.trSlice("未知", "Unknown", "不明"),
+                d.support.labelZh(),
             });
         }
     }
@@ -162,25 +212,27 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
         };
 
         if (run_all or std.ascii.eqlIgnoreCase(opts.bench_target, "cpu")) {
-            try w.print("\n[基准测试 1/3] 启动 CPU 确定性算力与稳定性校验 ({d} 线程, {d}s, 熔断 {d:.0}°C)...\n", .{ cfg.cpu_threads, cfg.duration_s, cfg.thermal_cutoff_c });
+            try w.print("\n[1/3] {s} ({d}T, {d}s, cutoff {d:.0}°C)...\n", .{
+                benchmarks.TestKind.cpu_stress.labelZh(), cfg.cpu_threads, cfg.duration_s, cfg.thermal_cutoff_c,
+            });
             try w.flush();
             if (runner.startCpuStress(cfg)) {
                 waitWithThermalGuard(&runner);
                 const snap = runner.copySnapshot();
-                try w.print("  结果: {s} | 算力: {d:.2} MOPS | 错误: {d} | 峰值温度: {?d:.1}°C\n", .{
-                    snap.outcome.labelZh(), snap.cpu_score_mops, snap.error_count, snap.peak_temp_c,
+                try w.print("  {s}: {s} | {d:.2} MOPS | Errors={d} | Peak={?d:.1}°C\n", .{
+                    i18n.trSlice("结果", "Result", "結果"), snap.outcome.labelZh(), snap.cpu_score_mops, snap.error_count, snap.peak_temp_c,
                 });
             }
         }
 
         if (run_all or std.ascii.eqlIgnoreCase(opts.bench_target, "mem")) {
-            try w.print("\n[基准测试 2/3] 启动 4 轮内存位翻转与带宽校验 ({d} MB)...\n", .{cfg.mem_size_mb});
+            try w.print("\n[2/3] {s} ({d} MB)...\n", .{ benchmarks.TestKind.memory_verify.labelZh(), cfg.mem_size_mb });
             try w.flush();
             if (runner.startMemoryVerify(cfg, sys.mem_avail_bytes)) {
                 waitWithThermalGuard(&runner);
                 const snap = runner.copySnapshot();
-                try w.print("  结果: {s} | 轮数: {d}/4 | 写入: {d:.2} GB/s | 回读校验: {d:.2} GB/s | 位错误: {d}\n", .{
-                    snap.outcome.labelZh(), snap.mem_passes_done, snap.mem_write_gbs, snap.mem_read_gbs, snap.error_count,
+                try w.print("  {s}: {s} | {d}/4 | W {d:.2} GB/s | R+Verify {d:.2} GB/s | Errors={d}\n", .{
+                    i18n.trSlice("结果", "Result", "結果"), snap.outcome.labelZh(), snap.mem_passes_done, snap.mem_write_gbs, snap.mem_read_gbs, snap.error_count,
                 });
             }
         }
@@ -189,13 +241,13 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
             var paths = try paths_mod.AppPaths.resolve(allocator);
             defer paths.deinit();
             paths.ensureDirectories();
-            try w.print("\n[基准测试 3/3] 启动文件级磁盘 SEQ1M / RND4K 基准 ({d} MB 临时文件于 {s}，结束后自动删除)...\n", .{ cfg.disk_file_mb, paths.logs_dir });
+            try w.print("\n[3/3] {s} ({d} MB -> {s})...\n", .{ benchmarks.TestKind.disk_bench.labelZh(), cfg.disk_file_mb, paths.logs_dir });
             try w.flush();
             if (runner.startDiskBench(cfg, paths.logs_dir)) {
                 waitWithThermalGuard(&runner);
                 const snap = runner.copySnapshot();
-                try w.print("  结果: {s} | SEQ1M 写 {d:.1} MB/s / 读 {d:.1} MB/s | RND4K 读 {d:.1} MB/s ({d:.0} IOPS, 延迟 {d:.1} us)\n", .{
-                    snap.outcome.labelZh(), snap.disk_seq_write_mbs, snap.disk_seq_read_mbs, snap.disk_rnd4k_read_mbs, snap.disk_rnd4k_read_iops, snap.disk_rnd4k_avg_lat_us,
+                try w.print("  {s}: {s} | SEQ1M W {d:.1} MB/s / R {d:.1} MB/s | RND4K R {d:.1} MB/s ({d:.0} IOPS, {d:.1} us)\n", .{
+                    i18n.trSlice("结果", "Result", "結果"), snap.outcome.labelZh(), snap.disk_seq_write_mbs, snap.disk_seq_read_mbs, snap.disk_rnd4k_read_mbs, snap.disk_rnd4k_read_iops, snap.disk_rnd4k_avg_lat_us,
                 });
             }
         }

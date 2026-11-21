@@ -1,6 +1,7 @@
 const std = @import("std");
+const i18n = @import("../core/i18n.zig");
 
-/// 规范 §7 + V2.0 全部导航页面
+/// 规范 §7 + V2.0 全部导航页面（支持中 / 英 / 日三语实时切换）
 pub const Page = enum(u8) {
     dashboard,
     cpu,
@@ -16,17 +17,17 @@ pub const Page = enum(u8) {
 
     pub fn labelZh(self: Page) [:0]const u8 {
         return switch (self) {
-            .dashboard => "硬件总览",
-            .cpu => "处理器 CPU",
-            .gpu => "显卡 GPU",
-            .memory => "内存 RAM",
-            .motherboard => "主板与传感器",
-            .disks => "磁盘健康",
-            .sensors => "全传感器表",
-            .stress_test => "硬件测试",
-            .history => "历史趋势",
-            .alerts => "告警中心",
-            .settings => "系统设置",
+            .dashboard => i18n.tr("硬件总览", "Overview", "概要"),
+            .cpu => i18n.tr("处理器 CPU", "Processor", "CPU"),
+            .gpu => i18n.tr("显卡 GPU", "Graphics", "GPU"),
+            .memory => i18n.tr("内存 RAM", "Memory", "メモリ"),
+            .motherboard => i18n.tr("主板与传感器", "Motherboard", "マザーボード"),
+            .disks => i18n.tr("磁盘健康", "Disk Health", "ディスク健康"),
+            .sensors => i18n.tr("全传感器表", "All Sensors", "全センサー"),
+            .stress_test => i18n.tr("硬件测试", "Benchmarks", "負荷テスト"),
+            .history => i18n.tr("历史趋势", "History", "履歴グラフ"),
+            .alerts => i18n.tr("告警中心", "Alerts", "アラート"),
+            .settings => i18n.tr("系统设置", "Settings", "設定"),
         };
     }
 
@@ -70,8 +71,8 @@ pub const CloseBehavior = enum(u8) {
 
     pub fn labelZh(self: CloseBehavior) [:0]const u8 {
         return switch (self) {
-            .minimize_to_tray => "最小化到系统托盘",
-            .exit_app => "直接退出程序",
+            .minimize_to_tray => i18n.tr("最小化到系统托盘", "Minimize to System Tray", "タスクトレイに最小化"),
+            .exit_app => i18n.tr("直接退出程序", "Exit Application", "アプリを終了"),
         };
     }
 };
@@ -82,8 +83,8 @@ pub const MinimizeBehavior = enum(u8) {
 
     pub fn labelZh(self: MinimizeBehavior) [:0]const u8 {
         return switch (self) {
-            .minimize_to_taskbar => "最小化到任务栏",
-            .minimize_to_tray => "最小化到系统托盘",
+            .minimize_to_taskbar => i18n.tr("最小化到任务栏", "Minimize to Taskbar", "タスクバーに最小化"),
+            .minimize_to_tray => i18n.tr("最小化到系统托盘", "Minimize to System Tray", "タスクトレイに最小化"),
         };
     }
 };
@@ -94,8 +95,8 @@ pub const ThemeMode = enum(u8) {
 
     pub fn labelZh(self: ThemeMode) [:0]const u8 {
         return switch (self) {
-            .dark => "深色主题",
-            .light => "浅色主题",
+            .dark => i18n.tr("深色主题", "Dark Theme", "ダークテーマ"),
+            .light => i18n.tr("浅色主题", "Light Theme", "ライトテーマ"),
         };
     }
 };
@@ -119,25 +120,25 @@ pub const TemperatureUnit = enum(u8) {
     }
 };
 
-/// 规范 §6.1 渲染节能状态机
+/// 规范 §6.1 渲染节能状态机（低 CPU / GPU 占用核心）
 pub const RenderMode = enum(u8) {
     active_60fps, // 窗口前台且有用户输入
-    idle_low_fps, // 窗口可见但无输入（约 1–2 FPS）
-    paused_hidden, // 窗口最小化或托盘隐藏（完全停止渲染）
+    idle_low_fps, // 窗口可见但无输入（约 1 FPS 按需节能）
+    paused_hidden, // 窗口最小化或托盘隐藏（完全停止渲染 0 FPS）
 
     pub fn labelZh(self: RenderMode) [:0]const u8 {
         return switch (self) {
-            .active_60fps => "活跃交互 (最高 60 FPS)",
-            .idle_low_fps => "静止节能 (按需 2 FPS)",
-            .paused_hidden => "后台休眠 (0 FPS 零渲染)",
+            .active_60fps => i18n.tr("活跃交互 (60 FPS)", "Active (60 FPS)", "アクティブ (60 FPS)"),
+            .idle_low_fps => i18n.tr("静止节能 (1 FPS)", "Idle Saver (1 FPS)", "省電力待機 (1 FPS)"),
+            .paused_hidden => i18n.tr("后台休眠 (0 FPS)", "Sleeping (0 FPS)", "休止中 (0 FPS)"),
         };
     }
 
     pub fn waitTimeoutSeconds(self: RenderMode) f64 {
         return switch (self) {
             .active_60fps => 0.0, // 由 swapInterval(1) 控制垂直同步
-            .idle_low_fps => 0.5, // 2 FPS 按需重绘
-            .paused_hidden => 0.25, // 不渲染，仅低频检查 Win32 托盘消息
+            .idle_low_fps => 1.0, // 1 FPS 低功耗重绘（数据更新或用户操作时立即唤醒）
+            .paused_hidden => 0.4, // 0 FPS 零渲染，仅极低频检查 Win32 托盘消息
         };
     }
 };
@@ -153,6 +154,7 @@ pub const AppState = struct {
     tray_available: bool = false,
 
     // 窗口与节能设置（规范 §2.6 / §6.1）
+    language: i18n.Language = .zh_cn,
     theme_mode: ThemeMode = .dark,
     close_behavior: CloseBehavior = .minimize_to_tray,
     minimize_behavior: MinimizeBehavior = .minimize_to_taskbar,

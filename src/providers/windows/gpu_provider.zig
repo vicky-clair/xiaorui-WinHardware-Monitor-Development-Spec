@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const win32 = @import("win32.zig");
 const sensor = @import("../../core/sensor.zig");
+const i18n = @import("../../core/i18n.zig");
 
 /// GPU 温度与运行参数采集 Provider（规范 §2.3 / §3.3）：
 /// 1. 厂商无关路线：D3DKMT (KMTQAITYPE_ADAPTERPERFDATA) 温度/风扇/显存频率 + DXGI 型号/显存/LUID 配对；
@@ -32,7 +33,7 @@ pub const GpuInfo = struct {
     fan_pct: ?u32 = null,
 
     pub fn nameSlice(self: *const GpuInfo) []const u8 {
-        return if (self.name_len > 0) self.name[0..self.name_len] else "未知显卡";
+        return if (self.name_len > 0) self.name[0..self.name_len] else i18n.trSlice("未知显卡", "Unknown GPU", "不明な GPU");
     }
 
     pub fn vendorName(self: *const GpuInfo) []const u8 {

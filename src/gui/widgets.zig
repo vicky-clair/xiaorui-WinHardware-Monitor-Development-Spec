@@ -4,6 +4,7 @@ const theme = @import("theme.zig");
 const state_mod = @import("../app/state.zig");
 const sensor = @import("../core/sensor.zig");
 const telemetry = @import("../core/telemetry.zig");
+const i18n = @import("../core/i18n.zig");
 
 /// 圆角 Bento 卡片容器（支持深色/浅色双主题；允许在内容超出时自动滚动，绝不静默裁切文字）
 pub fn beginCard(
@@ -337,8 +338,10 @@ pub fn drawLiveAreaPlot(
         return;
     }
 
-    var xs: [cap]f64 = undefined;
-    var ys: [cap]f64 = undefined;
+    // 低占用优化：60 秒视窗仅需最新 256 个采样点（500ms 采样下亦涵盖 128 秒），减少 7 倍栈拷贝与 ImPlot 顶点提交
+    const PLOT_WINDOW_CAP = @min(cap, 256);
+    var xs: [PLOT_WINDOW_CAP]f64 = undefined;
+    var ys: [PLOT_WINDOW_CAP]f64 = undefined;
     const n = rb.copyOrdered(&xs, &ys);
     const st = rb.stats();
 
@@ -379,19 +382,19 @@ pub fn drawLiveAreaPlot(
     }
 
     zgui.pushFont(null, 12.5 * dpi_scale);
-    zgui.textColored(p.text_muted, "当前: ", .{});
+    zgui.textColored(p.text_muted, "{s}: ", .{i18n.tr("当前", "Cur", "現在")});
     zgui.sameLine(.{ .spacing = 2.0 });
     zgui.textColored(line_color, "{d:.1}{s}", .{ st.current, unit_suffix });
     zgui.sameLine(.{ .spacing = 12.0 * dpi_scale });
-    zgui.textColored(p.text_muted, "平均: ", .{});
+    zgui.textColored(p.text_muted, "{s}: ", .{i18n.tr("平均", "Avg", "平均")});
     zgui.sameLine(.{ .spacing = 2.0 });
     zgui.textColored(p.text_secondary, "{d:.1}{s}", .{ st.avg, unit_suffix });
     zgui.sameLine(.{ .spacing = 12.0 * dpi_scale });
-    zgui.textColored(p.text_muted, "峰值: ", .{});
+    zgui.textColored(p.text_muted, "{s}: ", .{i18n.tr("峰值", "Max", "最大")});
     zgui.sameLine(.{ .spacing = 2.0 });
     zgui.textColored(p.text_secondary, "{d:.1}{s}", .{ st.max, unit_suffix });
     zgui.sameLine(.{ .spacing = 12.0 * dpi_scale });
-    zgui.textColored(p.text_muted, "样本: {d}", .{st.count});
+    zgui.textColored(p.text_muted, "{s}: {d}", .{ i18n.tr("样本", "Samples", "サンプル"), st.count });
     zgui.popFont();
 }
 
@@ -417,7 +420,7 @@ pub fn drawMetricTableRow(
 /// 结构化键值信息小块（自动换行，保证 100% 完整展示不截断）
 pub fn drawKeyValueLine(label: [:0]const u8, value: []const u8) void {
     const p = theme.active();
-    zgui.textColored(p.text_muted, "{s}：", .{label});
-    zgui.sameLine(.{ .spacing = 4.0 });
+    zgui.textColored(p.text_muted, "{s}: ", .{label});
+    zgui.sameLine(.{ .spacing = 2.0 });
     zgui.textWrapped("{s}", .{value});
 }

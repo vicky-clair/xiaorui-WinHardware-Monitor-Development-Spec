@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### V2.1 - 中/英/日三语全栈国际化、数据准确性加固与低硬件占用优化
+- **中 / 英 / 日三语全栈一致显示（`src/core/i18n.zig`）**：
+  - 支持 `zh-CN`（简体中文）、`en-US`（English）、`ja-JP`（日本語）实时无重启切换与 `settings.toml` 持久化，支持左侧栏一键切换、设置页单选及 CLI `--lang zh|en|ja`；
+  - 覆盖全部 11 个页面、状态枚举（`SensorStatus` / `HealthLevel` / `DiskSupport` / `TestKind` / `TestOutcome`）、26 项 ATA SMART 属性名、21 条磁盘健康规则证据、告警与托盘右键菜单/气泡通知、全传感器统计表（内部采用稳定键，切换语言零重复行）、测试报告与脱敏诊断报告；
+  - 字体引擎（`src/gui/fonts.zig`）采用 `merge_mode` 自动合并系统日文字体（Windows `YuGothM/meiryo/msgothic`，Linux `NotoSansCJK`），确保中文、英文与日文假名/汉字清晰无方框。
+- **硬件数据准确性加固**：
+  - Windows 磁盘基准测试新增 `FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH` + 4096 字节页对齐缓冲直通路径（绕过 Windows 系统内存页缓存，测得真实物理 SSD/HDD 的 SEQ1M 与 RND4K 吞吐及延迟），与 Linux 端 `posix_fadvise(POSIX_FADV_DONTNEED)` 保持跨平台一致精度；
+  - ATA SMART 温度解析增加零字节过滤，防止不支持温度属性却返回 0 的硬盘误报 `0°C`。
+- **低硬件资源占用优化**：
+  - `MonitoringService` 引入无锁原子发布序号 `latest_seq_atomic` 与 `tryCopySnapshotIfChanged`，仅在后台产生新样本时加锁拷贝快照，消除 GUI 60 FPS 期间 ~280 KB/帧的冗余内存拷贝与锁竞争（内存拷贝量降低 >100×）；
+  - 静置渲染周期优化至 1 FPS（有新样本或输入即时唤醒），取消主循环每帧重复原子同步；
+  - `drawLiveAreaPlot` 仅提取最近 60 秒视窗所需的最多 256 个点，降低 7× 栈拷贝与 ImPlot 顶点提交开销。
+
 ### V2.0 (Linux x86_64) - 跨平台原生采集、无界面 CLI 测试与 `.tar.gz`/`.deb`/`.rpm` 多格式打包
 - **新增 Linux 原生硬件采集层（`src/providers/linux/`）**：
   - `hwmon.zig`：直读内核 `/sys/class/hwmon`（CPU 封装/每核温度、主板温度、风扇、功耗、电压），零驱动即开即用；

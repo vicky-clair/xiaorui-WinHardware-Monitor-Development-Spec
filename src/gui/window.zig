@@ -20,6 +20,7 @@ const monitoring = @import("../services/monitoring.zig");
 const diagnostics = @import("../services/diagnostics.zig");
 const benchmarks = @import("../core/benchmarks.zig");
 const ata_smart = @import("../collectors/storage/ata_smart.zig");
+const i18n = @import("../core/i18n.zig");
 
 pub const RunOptions = struct {
     smoke_test: bool = false,
@@ -168,6 +169,21 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     };
     config.applyToState(&state);
     var applied_theme = state.theme_mode;
+    var applied_language = state.language;
+    var synced_paused = state.monitoring_paused;
+    var synced_interval_ms = state.system_interval_ms;
+    var synced_smart_ms = state.smart_interval_ms;
+    var synced_wake = state.allow_wake_standby_disk;
+    var synced_ext = state.extension_enabled;
+    var last_copied_seq: u64 = 0;
+
+    if (msg_wnd.tray.added) {
+        msg_wnd.tray.updateTooltip(i18n.tr(
+            "WinHardware Monitor - 硬件温度与磁盘健康监控",
+            "WinHardware Monitor - Thermal & Disk Health",
+            "WinHardware Monitor - ハードウェア温度・ディスク監視",
+        ));
+    }
 
     const ui_snapshot = try allocator.create(monitoring.SharedTelemetry);
     defer allocator.destroy(ui_snapshot);
@@ -195,29 +211,56 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     var window_shown = false;
 
     while (!state.should_exit) {
-        // 0. 实时同步黑白（深色/浅色）主题切换 + Win10/11 原生标题栏色调
+        // 0. 实时同步黑白（深色/浅色）主题切换 + Win10/11 原生标题栏色调 + 中英日三语切换
         if (state.theme_mode != applied_theme) {
             applied_theme = state.theme_mode;
             theme.applyTheme(applied_theme, state.dpi_scale);
             applyTitlebarTheme(native_hwnd, applied_theme);
             g_input_activity.store(true, .release);
         }
+        if (state.language != applied_language) {
+            applied_language = state.language;
+            i18n.setLanguage(applied_language);
+            if (msg_wnd.tray.added) {
+                msg_wnd.tray.updateTooltip(i18n.tr(
+                    "WinHardware Monitor - 硬件温度与磁盘健康监控",
+                    "WinHardware Monitor - Thermal & Disk Health",
+                    "WinHardware Monitor - ハードウェア温度・ディスク監視",
+                ));
+            }
+            g_input_activity.store(true, .release);
+        }
 
-        // 1. 同步暂停/采样间隔/电源保护/扩展组件开关给后台工作线程
-        monitor.setPaused(state.monitoring_paused);
-        monitor.setIntervalMs(state.system_interval_ms);
-        monitor.setSmartIntervalMs(state.smart_interval_ms);
-        monitor.setAllowWakeStandby(state.allow_wake_standby_disk);
-        monitor.setExtensionEnabled(state.extension_enabled);
+        // 1. 低占用优化：仅在设置变更时同步至后台工作线程，消除每帧重复原子写
+        if (state.monitoring_paused != synced_paused) {
+            synced_paused = state.monitoring_paused;
+            monitor.setPaused(synced_paused);
+        }
+        if (state.system_interval_ms != synced_interval_ms) {
+            synced_interval_ms = state.system_interval_ms;
+            monitor.setIntervalMs(synced_interval_ms);
+        }
+        if (state.smart_interval_ms != synced_smart_ms) {
+            synced_smart_ms = state.smart_interval_ms;
+            monitor.setSmartIntervalMs(synced_smart_ms);
+        }
+        if (state.allow_wake_standby_disk != synced_wake) {
+            synced_wake = state.allow_wake_standby_disk;
+            monitor.setAllowWakeStandby(synced_wake);
+        }
+        if (state.extension_enabled != synced_ext) {
+            synced_ext = state.extension_enabled;
+            monitor.setExtensionEnabled(synced_ext);
+        }
 
         if (state.request_launch_lhm_helper) {
             state.request_launch_lhm_helper = false;
             state.extension_enabled = true;
             if (!opts.smoke_test) {
                 switch (elevation.launchLhmHelperAsAdministrator(allocator, native_hwnd)) {
-                    .launched => state.lhm_action_msg = "已触发启动扩展辅助进程（等待命名管道连接）",
-                    .not_found => state.lhm_action_msg = "未找到 WinHardwareMonitor.LhmHelper.exe（请确认已安装扩展组件）",
-                    .cancelled => state.lhm_action_msg = "已取消 UAC 提权启动扩展辅助进程",
+                    .launched => state.lhm_action_msg = i18n.tr("已触发启动扩展辅助进程（等待命名管道连接）", "Extension helper launched (waiting for Named Pipe)", "拡張ヘルパーを起動しました（パイプ接続待機中）"),
+                    .not_found => state.lhm_action_msg = i18n.tr("未找到 WinHardwareMonitor.LhmHelper.exe（请确认已安装扩展组件）", "WinHardwareMonitor.LhmHelper.exe not found", "WinHardwareMonitor.LhmHelper.exe が見つかりません"),
+                    .cancelled => state.lhm_action_msg = i18n.tr("已取消 UAC 提权启动扩展辅助进程", "UAC elevation cancelled for extension helper", "拡張ヘルパーの管理者昇格がキャンセルされました"),
                 }
             }
         }
@@ -226,9 +269,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             state.extension_enabled = false;
             if (!opts.smoke_test) {
                 if (monitor.requestExtensionShutdown()) {
-                    state.lhm_action_msg = "已通知扩展辅助进程安全退出";
+                    state.lhm_action_msg = i18n.tr("已通知扩展辅助进程安全退出", "Extension helper shutdown requested", "拡張ヘルパーの安全終了を要求しました");
                 } else {
-                    state.lhm_action_msg = "扩展组件已关闭（辅助进程未在运行）";
+                    state.lhm_action_msg = i18n.tr("扩展组件已关闭（辅助进程未在运行）", "Extension disabled (helper not running)", "拡張機能オフ（ヘルパーは未稼働）");
                 }
             }
         }
@@ -244,7 +287,7 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         if (state.request_reset_sensor_stats) {
             state.request_reset_sensor_stats = false;
             monitor.resetSensorStats();
-            state.sensors_csv_msg = "已清零全部传感器最小/平均/最大统计";
+            state.sensors_csv_msg = i18n.tr("已清零全部传感器最小/平均/最大统计", "All sensor Min/Avg/Max stats reset", "全センサーの最小/平均/最大統計をリセットしました");
         }
         if (state.request_export_sensors_csv) {
             state.request_export_sensors_csv = false;
@@ -260,9 +303,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                             if (std.fs.createFileAbsolute(full_p, .{ .truncate = true })) |f| {
                                 defer f.close();
                                 f.writeAll(csv) catch {};
-                                state.sensors_csv_msg = "传感器 CSV 报表已导出至 logs 目录";
+                                state.sensors_csv_msg = i18n.tr("传感器 CSV 报表已导出至 logs 目录", "Sensor CSV exported to logs/", "センサー CSV を logs/ に出力しました");
                             } else |_| {
-                                state.sensors_csv_msg = "CSV 导出失败，请检查 logs 目录权限";
+                                state.sensors_csv_msg = i18n.tr("CSV 导出失败，请检查 logs 目录权限", "CSV export failed; check logs/ permissions", "CSV 出力失敗（logs/ の権限を確認）");
                             }
                         } else |_| {}
                     }
@@ -286,7 +329,7 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         if (state.request_stop_bench) {
             state.request_stop_bench = false;
             bench.requestStop();
-            state.bench_msg = "已请求停止硬件测试";
+            state.bench_msg = i18n.tr("已请求停止硬件测试", "Stop requested for active test", "テストの停止を要求しました");
         }
         if (state.request_start_cpu_bench) {
             state.request_start_cpu_bench = false;
@@ -296,7 +339,10 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                     .duration_s = @intCast(@max(state.bench_duration_s, 5)),
                     .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
                 });
-                state.bench_msg = if (ok) "CPU 稳定性与算力校验已启动" else "已有测试正在运行";
+                state.bench_msg = if (ok)
+                    i18n.tr("CPU 稳定性与算力校验已启动", "CPU stability & compute test started", "CPU 安定性・演算テストを開始しました")
+                else
+                    i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
             }
         }
         if (state.request_start_mem_bench) {
@@ -306,21 +352,27 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                     .mem_size_mb = @intCast(@max(state.bench_mem_mb, 32)),
                     .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
                 }, ui_snapshot.system.mem_avail_bytes);
-                state.bench_msg = if (ok) "4 轮内存位翻转与带宽校验已启动" else "已有测试正在运行";
+                state.bench_msg = if (ok)
+                    i18n.tr("4 轮内存位翻转与带宽校验已启动", "4-pass memory verification started", "4パス メモリ検証を開始しました")
+                else
+                    i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
             }
         }
         if (state.request_start_disk_bench) {
             state.request_start_disk_bench = false;
             if (!opts.smoke_test) {
                 if (!state.bench_disk_confirmed) {
-                    state.bench_msg = "请先勾选下方安全确认项后再执行磁盘写入基准测试";
+                    state.bench_msg = i18n.tr("请先勾选下方安全确认项后再执行磁盘写入基准测试", "Please check the safety confirmation before starting disk benchmark", "ディスクテスト開始前に下の安全確認にチェックを入れてください");
                 } else {
                     paths.ensureDirectories();
                     const ok = bench.startDiskBench(.{
                         .disk_file_mb = @intCast(@max(state.bench_disk_mb, 32)),
                         .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
                     }, paths.logs_dir);
-                    state.bench_msg = if (ok) "文件级磁盘基准测试已启动（结束后自动删除临时文件）" else "已有测试正在运行";
+                    state.bench_msg = if (ok)
+                        i18n.tr("无缓存文件级磁盘基准测试已启动（结束后自动删除临时文件）", "Unbuffered disk benchmark started (temp file auto-deleted)", "キャッシュ無効ディスクテストを開始（終了後自動削除）")
+                    else
+                        i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
                 }
             }
         }
@@ -331,7 +383,10 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                     .duration_s = @intCast(@max(state.bench_duration_s, 10)),
                     .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
                 });
-                state.bench_msg = if (ok) "GPU OpenGL 稳定性烤机已启动" else "已有测试正在运行";
+                state.bench_msg = if (ok)
+                    i18n.tr("GPU OpenGL 稳定性烤机已启动", "GPU OpenGL stress test started", "GPU OpenGL 負荷テストを開始しました")
+                else
+                    i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
             }
         }
         if (state.request_export_bench_report) {
@@ -349,9 +404,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                             if (std.fs.createFileAbsolute(full_p, .{ .truncate = true })) |f| {
                                 defer f.close();
                                 f.writeAll(rep) catch {};
-                                state.bench_msg = "硬件测试报告已导出至 logs 目录";
+                                state.bench_msg = i18n.tr("硬件测试报告已导出至 logs 目录", "Benchmark report exported to logs/", "テストレポートを logs/ に出力しました");
                             } else |_| {
-                                state.bench_msg = "导出失败，请检查 logs 目录权限";
+                                state.bench_msg = i18n.tr("导出失败，请检查 logs 目录权限", "Export failed; check logs/ permissions", "出力失敗（logs/ の権限を確認）");
                             }
                         } else |_| {}
                     }
@@ -362,14 +417,14 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             state.request_ata_short_selftest_idx = null;
             if (!opts.smoke_test and sidx < ui_snapshot.disk_count) {
                 if (!state.bench_smart_confirmed) {
-                    state.selftest_msg = "请先勾选 SMART 自检二次确认后再触发";
+                    state.selftest_msg = i18n.tr("请先勾选 SMART 自检二次确认后再触发", "Please check SMART self-test confirmation first", "SMART セルフテストの確認チェックを入れてください");
                 } else {
                     const drive_idx = ui_snapshot.disk_states[sidx].device.drive_index;
                     state.selftest_msg = switch (ata_smart.triggerAtaShortSelfTest(drive_idx)) {
-                        .started => "已向磁盘下发 ATA SMART 短自检指令（后台执行约 2 分钟）",
-                        .access_denied => "权限不足：请先以管理员身份重启后再下发 SMART 自检",
-                        .unsupported => "该磁盘或接口不支持标准 ATA SMART 短自检命令",
-                        .failed => "下发 SMART 短自检失败",
+                        .started => i18n.tr("已向磁盘下发 ATA SMART 短自检指令（后台执行约 2 分钟）", "ATA SMART short self-test started (~2 min in background)", "ATA SMART ショートセルフテストを開始しました（約2分）"),
+                        .access_denied => i18n.tr("权限不足：请先以管理员身份重启后再下发 SMART 自检", "Access denied: restart as Administrator to run SMART self-test", "権限不足：管理者として再起動してから実行してください"),
+                        .unsupported => i18n.tr("该磁盘或接口不支持标准 ATA SMART 短自检命令", "Drive/bus does not support standard ATA SMART short self-test", "このディスクは標準 ATA SMART セルフテスト非対応です"),
+                        .failed => i18n.tr("下发 SMART 短自检失败", "Failed to issue SMART short self-test", "SMART ショートセルフテストの送信に失敗しました"),
                     };
                 }
             }
@@ -388,21 +443,24 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                             if (std.fs.createFileAbsolute(full_p, .{ .truncate = true })) |f| {
                                 defer f.close();
                                 f.writeAll(rep) catch {};
-                                state.diag_export_msg = "脱敏诊断报告已导出至 logs 目录";
+                                state.diag_export_msg = i18n.tr("脱敏诊断报告已导出至 logs 目录", "Sanitized diagnostics exported to logs/", "匿名化診断レポートを logs/ に出力しました");
                             } else |_| {
-                                state.diag_export_msg = "导出失败，请检查 logs 目录权限";
+                                state.diag_export_msg = i18n.tr("导出失败，请检查 logs 目录权限", "Export failed; check logs/ permissions", "出力失敗（logs/ の権限を確認）");
                             }
                         } else |_| {}
                     }
                 } else |_| {
-                    state.diag_export_msg = "生成诊断报告失败";
+                    state.diag_export_msg = i18n.tr("生成诊断报告失败", "Failed to build diagnostics report", "診断レポートの生成に失敗しました");
                 }
             }
         }
 
         if (state.desktop_notifications and !opts.smoke_test) {
             if (monitor.takePendingNotification()) |ev| {
-                const title = if (ev.is_recovery) "WinHardware Monitor — 告警恢复" else "WinHardware Monitor — 硬件告警";
+                const title = if (ev.is_recovery)
+                    i18n.tr("WinHardware Monitor — 告警恢复", "WinHardware Monitor — Alert Recovered", "WinHardware Monitor — アラート回復")
+                else
+                    i18n.tr("WinHardware Monitor — 硬件告警", "WinHardware Monitor — Hardware Alert", "WinHardware Monitor — ハードウェア警告");
                 const flags: win32.DWORD = if (ev.is_recovery)
                     win32.NIIF_INFO
                 else if (ev.level == .critical)
@@ -424,9 +482,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                 _ = autostart.setAutoStart(config.start_with_windows);
                 paths.ensureDirectories();
                 if (config.saveFile(allocator, paths.settings_file)) |_| {
-                    state.config_save_msg = "配置已保存";
+                    state.config_save_msg = i18n.tr("配置已保存", "Configuration saved", "設定を保存しました");
                 } else |_| {
-                    state.config_save_msg = "保存失败，请检查目录权限";
+                    state.config_save_msg = i18n.tr("保存失败，请检查目录权限", "Save failed; check directory permissions", "保存失敗（フォルダ権限を確認）");
                 }
             }
         }
@@ -441,9 +499,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                 if (std.fs.path.join(allocator, &.{ paths.config_dir, "settings_backup.toml" })) |exp_path| {
                     defer allocator.free(exp_path);
                     if (config.saveFile(allocator, exp_path)) |_| {
-                        state.config_save_msg = "已导出配置至 config/settings_backup.toml";
+                        state.config_save_msg = i18n.tr("已导出配置至 config/settings_backup.toml", "Exported to config/settings_backup.toml", "config/settings_backup.toml に出力しました");
                     } else |_| {
-                        state.config_save_msg = "配置导出失败，请检查目录权限";
+                        state.config_save_msg = i18n.tr("配置导出失败，请检查目录权限", "Config export failed; check permissions", "設定のエクスポートに失敗しました");
                     }
                 } else |_| {}
             }
@@ -460,9 +518,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                         state.smart_interval_ms = config.smart_interval_ms;
                         state.allow_wake_standby_disk = config.allow_wake_standby_disk;
                         config.saveFile(allocator, paths.settings_file) catch {};
-                        state.config_save_msg = "已从 config/settings_backup.toml 导入并生效";
+                        state.config_save_msg = i18n.tr("已从 config/settings_backup.toml 导入并生效", "Imported from config/settings_backup.toml", "config/settings_backup.toml を読み込みました");
                     } else |_| {
-                        state.config_save_msg = "未找到 config/settings_backup.toml";
+                        state.config_save_msg = i18n.tr("未找到 config/settings_backup.toml", "config/settings_backup.toml not found", "config/settings_backup.toml が見つかりません");
                     }
                 } else |_| {}
             }
@@ -474,7 +532,7 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             state.system_interval_ms = config.system_interval_ms;
             state.smart_interval_ms = config.smart_interval_ms;
             state.allow_wake_standby_disk = config.allow_wake_standby_disk;
-            state.config_save_msg = "已恢复默认（点击保存后生效）";
+            state.config_save_msg = i18n.tr("已恢复默认（点击保存后生效）", "Defaults restored (click Save to persist)", "初期値に戻しました（保存で確定）");
         }
 
         // 3. 泵送隐藏窗口的 Win32 消息
@@ -557,7 +615,14 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         } else {
             switch (mode) {
                 .active_60fps => zglfw.pollEvents(),
-                .idle_low_fps => zglfw.waitEventsTimeout(mode.waitTimeoutSeconds()),
+                .idle_low_fps => {
+                    // 若后台刚发布了新硬件快照，立即刷新一帧，否则低功耗休眠等待输入或 1 秒周期
+                    if (monitor.latestSeqAtomic() != last_copied_seq) {
+                        zglfw.pollEvents();
+                    } else {
+                        zglfw.waitEventsTimeout(mode.waitTimeoutSeconds());
+                    }
+                },
                 .paused_hidden => {
                     state.skipped_frames += 1;
                     zglfw.waitEventsTimeout(mode.waitTimeoutSeconds());
@@ -577,8 +642,8 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             continue;
         }
 
-        // 7. 绝对非阻塞拷贝后台快照（即使后台正在读磁盘或写 SQLite，UI 也绝不卡死白屏）
-        if (monitor.tryCopySnapshot(ui_snapshot)) {
+        // 7. 低占用绝对非阻塞快照同步：仅在 sample_seq 变化时拷贝一次（内存拷贝量降低 ~120 倍）
+        if (monitor.tryCopySnapshotIfChanged(ui_snapshot, &last_copied_seq)) {
             state.active_alert_count = ui_snapshot.active_alert_count;
             if (ui_snapshot.has_system_sample and state.bench_cpu_threads == 4 and ui_snapshot.system.logical_cores > 0) {
                 state.bench_cpu_threads = @intCast(ui_snapshot.system.logical_cores);
@@ -652,8 +717,11 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             const pages = std.meta.tags(state_mod.Page);
             if (smoke_frames < pages.len) {
                 state.current_page = pages[smoke_frames];
-                // 同时在冒烟测试中切换浅色主题验证两套主题渲染无崩溃
-                if (smoke_frames == pages.len / 2) {
+                // 在冒烟测试中遍历深/浅双主题与中/英/日三语，验证全语种与全页面渲染零崩溃
+                if (smoke_frames == pages.len / 3) {
+                    state.language = .en_us;
+                } else if (smoke_frames == (pages.len * 2) / 3) {
+                    state.language = .ja_jp;
                     state.theme_mode = .light;
                 }
             } else {

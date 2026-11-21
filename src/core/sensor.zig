@@ -1,4 +1,5 @@
 const std = @import("std");
+const i18n = @import("i18n.zig");
 
 /// 规范 §3.1 传感器状态枚举（严格区分有效 0 与各类失败原因）
 pub const SensorStatus = enum(u8) {
@@ -15,16 +16,16 @@ pub const SensorStatus = enum(u8) {
 
     pub fn labelZh(self: SensorStatus) [:0]const u8 {
         return switch (self) {
-            .ok => "正常",
-            .unsupported => "不支持",
-            .access_denied => "权限不足",
-            .requires_extension => "需要扩展组件",
-            .transient_error => "读取失败",
-            .timeout => "读取超时",
-            .device_standby => "设备休眠",
-            .device_removed => "设备已移除",
-            .stale => "数据过期",
-            .unknown => "未知",
+            .ok => i18n.tr("正常", "OK", "正常"),
+            .unsupported => i18n.tr("不支持", "Unsupported", "非対応"),
+            .access_denied => i18n.tr("权限不足", "Access Denied", "権限不足"),
+            .requires_extension => i18n.tr("需要扩展组件", "Extension Required", "拡張が必要"),
+            .transient_error => i18n.tr("读取失败", "Read Error", "読取失敗"),
+            .timeout => i18n.tr("读取超时", "Timeout", "タイムアウト"),
+            .device_standby => i18n.tr("设备休眠", "Standby", "スリープ中"),
+            .device_removed => i18n.tr("设备已移除", "Removed", "切断済み"),
+            .stale => i18n.tr("数据过期", "Stale", "古いデータ"),
+            .unknown => i18n.tr("未知", "Unknown", "不明"),
         };
     }
 };
@@ -38,10 +39,10 @@ pub const SensorAccuracy = enum(u8) {
 
     pub fn labelZh(self: SensorAccuracy) [:0]const u8 {
         return switch (self) {
-            .measured => "实测值",
-            .derived => "计算值",
-            .estimated => "估算值",
-            .unknown => "未知",
+            .measured => i18n.tr("实测值", "Measured", "実測値"),
+            .derived => i18n.tr("计算值", "Derived", "算出値"),
+            .estimated => i18n.tr("估算值", "Estimated", "推定値"),
+            .unknown => i18n.tr("未知", "Unknown", "不明"),
         };
     }
 };
@@ -56,11 +57,11 @@ pub const HealthLevel = enum(u8) {
 
     pub fn labelZh(self: HealthLevel) [:0]const u8 {
         return switch (self) {
-            .normal => "正常",
-            .caution => "注意",
-            .warning => "警告",
-            .critical => "严重",
-            .unknown => "未知",
+            .normal => i18n.tr("正常", "Healthy", "正常"),
+            .caution => i18n.tr("注意", "Caution", "注意"),
+            .warning => i18n.tr("警告", "Warning", "警告"),
+            .critical => i18n.tr("严重", "Critical", "危険"),
+            .unknown => i18n.tr("未知", "Unknown", "不明"),
         };
     }
 

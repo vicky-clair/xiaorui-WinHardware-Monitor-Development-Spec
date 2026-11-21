@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const win32 = @import("../providers/windows/win32.zig");
+const i18n = @import("../core/i18n.zig");
 
 /// Windows 系统托盘管理（规范 §2.6）。
 /// 若当前桌面会话未挂载 Shell_TrayWnd（如无头或 Explorer 重启期间），静默降级不崩溃，
@@ -75,14 +76,17 @@ pub const TrayIcon = struct {
         const menu = win32.CreatePopupMenu() orelse return null;
         defer _ = win32.DestroyMenu(menu);
 
-        const open_lbl = std.unicode.utf8ToUtf16LeStringLiteral("打开主窗口");
-        const pause_lbl = std.unicode.utf8ToUtf16LeStringLiteral("暂停采集");
-        const exit_lbl = std.unicode.utf8ToUtf16LeStringLiteral("退出程序");
+        var open_w: [64]u16 = undefined;
+        var pause_w: [64]u16 = undefined;
+        var exit_w: [64]u16 = undefined;
+        copyUtf8ToUtf16Buf(&open_w, i18n.tr("打开主窗口", "Open Window", "ウィンドウを開く"));
+        copyUtf8ToUtf16Buf(&pause_w, i18n.tr("暂停采集", "Pause Monitoring", "監視を一時停止"));
+        copyUtf8ToUtf16Buf(&exit_w, i18n.tr("退出程序", "Exit", "終了"));
 
-        _ = win32.AppendMenuW(menu, win32.MF_STRING, MENU_OPEN, open_lbl);
-        _ = win32.AppendMenuW(menu, win32.MF_STRING | (if (paused) win32.MF_CHECKED else 0), MENU_TOGGLE_PAUSE, pause_lbl);
+        _ = win32.AppendMenuW(menu, win32.MF_STRING, MENU_OPEN, @ptrCast(&open_w));
+        _ = win32.AppendMenuW(menu, win32.MF_STRING | (if (paused) win32.MF_CHECKED else 0), MENU_TOGGLE_PAUSE, @ptrCast(&pause_w));
         _ = win32.AppendMenuW(menu, win32.MF_SEPARATOR, 0, null);
-        _ = win32.AppendMenuW(menu, win32.MF_STRING, MENU_EXIT, exit_lbl);
+        _ = win32.AppendMenuW(menu, win32.MF_STRING, MENU_EXIT, @ptrCast(&exit_w));
 
         var pt: win32.POINT = .{};
         _ = win32.GetCursorPos(&pt);

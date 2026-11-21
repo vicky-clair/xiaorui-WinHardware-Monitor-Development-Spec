@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const win32 = @import("../../providers/windows/win32.zig");
 const device_id = @import("../../core/device_id.zig");
 const sensor = @import("../../core/sensor.zig");
+const i18n = @import("../../core/i18n.zig");
 
 /// 规范 §2.5 物理磁盘枚举模块。
 /// 使用零访问权限句柄（dwDesiredAccess = 0）在普通用户权限下完成物理磁盘枚举、接口识别、容量查询与稳定 ID 生成，
@@ -20,13 +21,13 @@ pub const DiskSupport = enum(u8) {
 
     pub fn labelZh(self: DiskSupport) [:0]const u8 {
         return switch (self) {
-            .nvme_native => "NVMe 原生接口",
-            .sata_ata => "SATA/ATA（需管理员）",
-            .usb_sat => "USB SAT 透传（需管理员）",
-            .unsupported_raid => "RAID 阵列（不支持直读）",
-            .unsupported_spaces => "存储空间虚拟盘（不支持）",
-            .unsupported_virtual => "虚拟机磁盘（不支持）",
-            .unknown_bus => "未知总线类型",
+            .nvme_native => i18n.tr("NVMe 原生接口", "NVMe Native", "NVMe ネイティブ"),
+            .sata_ata => i18n.tr("SATA/ATA（需管理员）", "SATA/ATA (Admin Req.)", "SATA/ATA（管理者権限）"),
+            .usb_sat => i18n.tr("USB SAT 透传（需管理员）", "USB SAT Pass-through (Admin)", "USB SAT パススルー（管理者）"),
+            .unsupported_raid => i18n.tr("RAID 阵列（不支持直读）", "RAID Array (Unsupported)", "RAID アレイ（非対応）"),
+            .unsupported_spaces => i18n.tr("存储空间虚拟盘（不支持）", "Storage Spaces (Unsupported)", "記憶域スペース（非対応）"),
+            .unsupported_virtual => i18n.tr("虚拟机磁盘（不支持）", "Virtual Disk (Unsupported)", "仮想ディスク（非対応）"),
+            .unknown_bus => i18n.tr("未知总线类型", "Unknown Bus", "不明なバス"),
         };
     }
 
@@ -75,7 +76,7 @@ pub const DiskDevice = struct {
         }
         if (m.len > 0) return m;
         if (v.len > 0) return v;
-        return "未知磁盘";
+        return i18n.trSlice("未知磁盘", "Unknown Disk", "不明なディスク");
     }
 
     pub fn firmwareSlice(self: *const DiskDevice) []const u8 {

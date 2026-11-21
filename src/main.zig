@@ -6,6 +6,7 @@ const std = @import("std");
 const SingleInstance = @import("platform/single_instance.zig").SingleInstance;
 const window = @import("gui/window.zig");
 const cli = @import("cli.zig");
+const i18n = @import("core/i18n.zig");
 
 pub fn main() !void {
     // 通用内存分配器：退出时由 defer 自动检查资源释放
@@ -43,6 +44,8 @@ pub fn main() !void {
             if (args.next()) |v| cli_opts.disk_mb = std.fmt.parseInt(u32, v, 10) catch 128;
         } else if (std.mem.eql(u8, arg, "--cutoff-c")) {
             if (args.next()) |v| cli_opts.cutoff_c = std.fmt.parseFloat(f64, v) catch 90.0;
+        } else if (std.mem.eql(u8, arg, "--lang")) {
+            if (args.next()) |v| i18n.setLanguage(i18n.Language.fromCode(v));
         }
     }
 

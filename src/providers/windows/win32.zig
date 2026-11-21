@@ -38,7 +38,11 @@ pub const GENERIC_READ: DWORD = 0x80000000;
 pub const GENERIC_WRITE: DWORD = 0x40000000;
 pub const FILE_SHARE_READ: DWORD = 0x00000001;
 pub const FILE_SHARE_WRITE: DWORD = 0x00000002;
+pub const CREATE_ALWAYS: DWORD = 2;
 pub const OPEN_EXISTING: DWORD = 3;
+pub const FILE_FLAG_NO_BUFFERING: DWORD = 0x20000000;
+pub const FILE_FLAG_WRITE_THROUGH: DWORD = 0x80000000;
+pub const FILE_BEGIN: DWORD = 0;
 
 // Storage IOCTLs (winioctl.h / ntddscsi.h)
 pub const IOCTL_STORAGE_QUERY_PROPERTY: DWORD = 0x002D1400;
@@ -557,6 +561,13 @@ pub extern "kernel32" fn WriteFile(
     lpNumberOfBytesWritten: ?*DWORD,
     lpOverlapped: LPVOID,
 ) callconv(.winapi) BOOL;
+pub extern "kernel32" fn SetFilePointerEx(
+    hFile: HANDLE,
+    liDistanceToMove: i64,
+    lpNewFilePointer: ?*i64,
+    dwMoveMethod: DWORD,
+) callconv(.winapi) BOOL;
+pub extern "kernel32" fn FlushFileBuffers(hFile: HANDLE) callconv(.winapi) BOOL;
 pub extern "kernel32" fn WaitNamedPipeW(
     lpNamedPipeName: LPCWSTR,
     nTimeOut: DWORD,

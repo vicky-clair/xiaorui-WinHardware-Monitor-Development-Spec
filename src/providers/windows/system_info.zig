@@ -4,6 +4,7 @@ const win32 = @import("win32.zig");
 const smbios = @import("smbios.zig");
 const pdh = @import("pdh.zig");
 const sensor = @import("../../core/sensor.zig");
+const i18n = @import("../../core/i18n.zig");
 
 pub const MAX_LOGICAL_CORES = 64;
 
@@ -58,7 +59,7 @@ pub const SystemSnapshot = struct {
     smbios_info: smbios.SmbiosData = .{},
 
     pub fn cpuNameSlice(self: *const SystemSnapshot) []const u8 {
-        if (self.cpu_name_len == 0) return "未知处理器";
+        if (self.cpu_name_len == 0) return i18n.trSlice("未知处理器", "Unknown CPU", "不明な CPU");
         return self.cpu_name[0..self.cpu_name_len];
     }
 };
@@ -163,7 +164,7 @@ pub const WinSystemInfoProvider = struct {
             snap.cpu_clock_mhz = @floatFromInt(self.base_clock_mhz);
             snap.cpu_clock_status = .ok;
             snap.cpu_clock_accuracy = .derived;
-            snap.cpu_clock_source = "registry:~MHz (基础频率)";
+            snap.cpu_clock_source = "registry:~MHz";
         }
 
         snap.disk_read_mbs = pdh_sample.disk_read_mbs;
