@@ -16,6 +16,7 @@ pub const StableId = struct {
     }
 };
 
+/// 校验硬件序列号是否有效（过滤空串、过短串以及全 0 / 全 F / 全占位符的无效厂商固件值）
 pub fn isSerialValid(raw_serial: []const u8) bool {
     const trimmed = std.mem.trim(u8, raw_serial, " \t\r\n\x00");
     if (trimmed.len < 4) return false;
@@ -31,6 +32,8 @@ pub fn isSerialValid(raw_serial: []const u8) bool {
     return true;
 }
 
+/// 根据磁盘接口类型、型号、序列号及 WWN/EUI 生成跨重启不变的 16 位十六进制稳定设备 ID；
+/// 若序列号与 WWN 均缺失，则回退到设备路径并显式标记 `is_stable = false`。
 pub fn computeDiskId(
     interface_name: []const u8,
     model: []const u8,

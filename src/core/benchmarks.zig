@@ -164,23 +164,17 @@ pub const BenchmarkSnapshot = struct {
     gpu_avg_frametime_ms: f64 = 0.0,
     gpu_max_frametime_ms: f64 = 0.0,
 
-    // 实时过程曲线缓冲（用于右侧 ImPlot 温度 + 性能曲线可视化）
+    // 实时过程曲线缓冲（用于右侧 ImPlot 温度 + 性能双轴曲线可视化）
     trace_times: [TRACE_CAPACITY]f64 = [_]f64{0.0} ** TRACE_CAPACITY,
     trace_perf: [TRACE_CAPACITY]f64 = [_]f64{0.0} ** TRACE_CAPACITY,
     trace_temp: [TRACE_CAPACITY]f64 = [_]f64{0.0} ** TRACE_CAPACITY,
     trace_len: usize = 0,
-    trace_perf_unit: [16]u8 = std.mem.zeroes([16]u8),
-    trace_perf_unit_len: usize = 0,
 
     summary: [192]u8 = std.mem.zeroes([192]u8),
     summary_len: usize = 0,
 
     pub fn summarySlice(self: *const BenchmarkSnapshot) []const u8 {
         return self.summary[0..self.summary_len];
-    }
-
-    pub fn perfUnitSlice(self: *const BenchmarkSnapshot) []const u8 {
-        return if (self.trace_perf_unit_len > 0) self.trace_perf_unit[0..self.trace_perf_unit_len] else "Perf";
     }
 
     pub fn pushTrace(self: *BenchmarkSnapshot, t_s: f64, perf_val: f64, temp_opt: ?f64) void {
@@ -469,7 +463,7 @@ pub const BenchmarkRunner = struct {
         }
     }
 
-    fn beginRunLocked(self: *BenchmarkRunner, kind: TestKind, cfg: BenchmarkConfig, perf_unit: []const u8) void {
+    fn beginRunLocked(self: *BenchmarkRunner, kind: TestKind, cfg: BenchmarkConfig) void {
         self.run_counter += 1;
         self.suite_gpu_phase = false;
         self.gpu_ft_count = 0;
@@ -487,7 +481,6 @@ pub const BenchmarkRunner = struct {
             .gentle_mode = cfg.gentle_mode,
             .gpu_intensity = @min(cfg.gpu_intensity, 2),
         };
-        setFixed(&self.snap.trace_perf_unit, &self.snap.trace_perf_unit_len, perf_unit);
     }
 
     pub fn startCpuStress(self: *BenchmarkRunner, cfg: BenchmarkConfig) bool {
@@ -503,7 +496,7 @@ pub const BenchmarkRunner = struct {
         c.duration_s = dur;
 
         self.mutex.lock();
-        self.beginRunLocked(.cpu_stress, c, "MOPS");
+        self.beginRunLocked(.cpu_stress, c);
         self.snap.cpu_threads = threads;
         setSummary(&self.snap, i18n.trSlice(
             "正在运行低优先级 CPU 单核 + 多核确定性校验与降频分析...",
@@ -535,7 +528,7 @@ pub const BenchmarkRunner = struct {
         c.mem_size_mb = size_mb;
 
         self.mutex.lock();
-        self.beginRunLocked(.memory_verify, c, "GB/s");
+        self.beginRunLocked(.memory_verify, c);
         self.snap.mem_tested_mb = size_mb;
         setSummary(&self.snap, i18n.trSlice(
             "正在执行 L1/L2/L3/RAM 延迟测量、多核拷贝带宽与 4 轮位翻转校验...",
@@ -563,7 +556,7 @@ pub const BenchmarkRunner = struct {
         const dir_copy = self.allocator.dupe(u8, target_dir) catch return false;
 
         self.mutex.lock();
-        self.beginRunLocked(.disk_bench, c, "MB/s");
+        self.beginRunLocked(.disk_bench, c);
         self.snap.disk_file_mb = file_mb;
         setSummary(&self.snap, i18n.trSlice(
             "正在执行空间安全检查、无缓存 SEQ1M/RND4K 读写与完整性校验...",
@@ -598,7 +591,7 @@ pub const BenchmarkRunner = struct {
         self.gpu_trace_frames_base = 0;
 
         self.mutex.lock();
-        self.beginRunLocked(.gpu_stress, c, "FPS");
+        self.beginRunLocked(.gpu_stress, c);
         self.snap.gpu_shader_active = true;
         self.snap.has_gpu_result = true;
         setSummary(&self.snap, i18n.trSlice(
@@ -632,7 +625,7 @@ pub const BenchmarkRunner = struct {
         self.gpu_trace_frames_base = 0;
 
         self.mutex.lock();
-        self.beginRunLocked(.combined_stress, c, "FPS");
+        self.beginRunLocked(.combined_stress, c);
         self.snap.cpu_threads = safe_threads;
         self.snap.gpu_shader_active = true;
         self.snap.has_cpu_result = true;
@@ -671,7 +664,7 @@ pub const BenchmarkRunner = struct {
         const dir_copy = self.allocator.dupe(u8, target_dir) catch return false;
 
         self.mutex.lock();
-        self.beginRunLocked(.full_suite, c, "Score");
+        self.beginRunLocked(.full_suite, c);
         self.snap.cpu_threads = c.cpu_threads;
         self.snap.mem_tested_mb = c.mem_size_mb;
         self.snap.disk_file_mb = c.disk_file_mb;

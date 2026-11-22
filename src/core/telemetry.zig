@@ -6,6 +6,7 @@ pub fn RingBuffer(comptime capacity: usize) type {
     return struct {
         const Self = @This();
 
+        /// 环形缓冲区统计摘要（当前值 / 最小值 / 最大值 / 平均值）
         pub const Stats = struct {
             count: usize = 0,
             current: f64 = 0.0,
@@ -19,6 +20,7 @@ pub fn RingBuffer(comptime capacity: usize) type {
         head: usize = 0,
         len: usize = 0,
 
+        /// 追加一个 `(时间戳 x, 采样值 y)` 数据点；满容量时自动覆盖最早记录
         pub fn push(self: *Self, x: f64, y: f64) void {
             self.xs[self.head] = x;
             self.ys[self.head] = y;
@@ -28,6 +30,7 @@ pub fn RingBuffer(comptime capacity: usize) type {
             }
         }
 
+        /// 清空环形缓冲区（仅重置游标，不执行内存释放）
         pub fn clear(self: *Self) void {
             self.head = 0;
             self.len = 0;
@@ -48,6 +51,7 @@ pub fn RingBuffer(comptime capacity: usize) type {
             return n;
         }
 
+        /// 计算当前有效窗口内的统计值（当前/最小/最大/平均）
         pub fn stats(self: *const Self) Stats {
             if (self.len == 0) return .{};
             const oldest = (self.head + capacity - self.len) % capacity;

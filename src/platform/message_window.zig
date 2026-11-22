@@ -30,6 +30,7 @@ pub const MessageWindow = struct {
     const CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("WinHardwareMonitor_HiddenMsgWnd_v1");
     const TASKBAR_MSG_NAME = std.unicode.utf8ToUtf16LeStringLiteral("TaskbarCreated");
 
+    /// 注册窗口类并创建不可见的顶层消息窗口，同时挂载系统托盘图标
     pub fn init(self: *MessageWindow) !void {
         if (builtin.os.tag != .windows) return;
         self.hinst = @ptrCast(win32.GetModuleHandleW(null));
@@ -70,6 +71,7 @@ pub const MessageWindow = struct {
         _ = self.tray.attach(hwnd, default_tip);
     }
 
+    /// 卸载托盘图标并销毁隐藏消息窗口及窗口类
     pub fn deinit(self: *MessageWindow) void {
         if (builtin.os.tag != .windows) return;
         self.tray.detach();
@@ -84,6 +86,7 @@ pub const MessageWindow = struct {
         }
     }
 
+    /// 非阻塞轮询并分发当前隐藏窗口消息队列中的所有 Win32 事件
     pub fn pumpMessages(self: *MessageWindow) void {
         if (builtin.os.tag != .windows) return;
         const hwnd = self.hwnd orelse return;
@@ -94,6 +97,7 @@ pub const MessageWindow = struct {
         }
     }
 
+    /// 更新系统托盘悬停提示文本并缓存（供 Explorer 重启重建托盘图标时复用）
     pub fn setTooltip(self: *MessageWindow, tip: []const u8) void {
         self.setTooltipCache(tip);
         self.tray.updateTooltip(tip);
@@ -105,6 +109,7 @@ pub const MessageWindow = struct {
         self.tooltip_len = n;
     }
 
+    /// Win32 消息回调函数：分发 Explorer 重建、托盘左右键、设备热插拔与电源状态事件
     fn wndProc(hwnd: win32.HWND, msg: win32.UINT, wp: win32.WPARAM, lp: win32.LPARAM) callconv(.winapi) win32.LRESULT {
         const raw_ptr = win32.GetWindowLongPtrW(hwnd, win32.GWLP_USERDATA);
         if (raw_ptr != 0) {

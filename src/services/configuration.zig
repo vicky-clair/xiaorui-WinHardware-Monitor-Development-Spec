@@ -52,6 +52,7 @@ pub const AppConfig = struct {
     nvme_percentage_used_warning: u32 = 100,
     ssd_life_left_warning: u32 = 10,
 
+    /// 从 TOML 文本解析配置并对所有数值字段执行安全范围钳位；解析失败时安全回退默认值
     pub fn fromToml(allocator: std.mem.Allocator, content: []const u8) AppConfig {
         var cfg = AppConfig{};
         var doc = toml.Document.parse(allocator, content) catch return cfg;
@@ -113,6 +114,7 @@ pub const AppConfig = struct {
         return cfg;
     }
 
+    /// 将当前配置序列化为标准 TOML 文本，便于保存或备份导出
     pub fn toToml(self: *const AppConfig, allocator: std.mem.Allocator) ![]u8 {
         var doc = toml.Document.init(allocator);
         defer doc.deinit();
@@ -161,6 +163,7 @@ pub const AppConfig = struct {
         return doc.serialize(allocator);
     }
 
+    /// 读取磁盘配置文件，不存在或读取失败时返回默认配置
     pub fn loadFileOrDefault(allocator: std.mem.Allocator, abs_path: []const u8) AppConfig {
         const file = std.fs.openFileAbsolute(abs_path, .{}) catch return AppConfig{};
         defer file.close();
@@ -169,6 +172,7 @@ pub const AppConfig = struct {
         return AppConfig.fromToml(allocator, bytes);
     }
 
+    /// 将配置以 TOML 格式覆盖写入指定绝对路径
     pub fn saveFile(self: *const AppConfig, allocator: std.mem.Allocator, abs_path: []const u8) !void {
         const text = try self.toToml(allocator);
         defer allocator.free(text);
@@ -177,6 +181,7 @@ pub const AppConfig = struct {
         try file.writeAll(text);
     }
 
+    /// 将持久化配置应用到运行时全局应用状态（含三语语言全局生效）
     pub fn applyToState(self: *const AppConfig, st: *state_mod.AppState) void {
         st.language = i18n.Language.fromCode(self.language[0..self.language_len]);
         i18n.setLanguage(st.language);
@@ -188,6 +193,7 @@ pub const AppConfig = struct {
         st.extension_enabled = self.enable_extension_helper;
     }
 
+    /// 将界面修改后的运行时状态同步回配置结构体，供落盘保存
     pub fn syncFromState(self: *AppConfig, st: *const state_mod.AppState) void {
         const code = st.language.code();
         const n = @min(self.language.len, code.len);

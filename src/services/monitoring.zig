@@ -266,15 +266,7 @@ pub const MonitoringService = struct {
         self.latest_seq_atomic.store(self.shared.sample_seq, .release);
     }
 
-    /// 非阻塞拷贝后台快照（GUI 主线程专用：即使后台正在采集硬件或写入 SQLite，也绝不阻塞渲染帧）
-    pub fn tryCopySnapshot(self: *MonitoringService, out: *SharedTelemetry) bool {
-        if (!self.mutex.tryLock()) return false;
-        defer self.mutex.unlock();
-        out.* = self.shared;
-        return true;
-    }
-
-    /// 低占用零冗余快照拷贝：仅当后台发布了新样本序号时才尝试加锁拷贝，避免 60 FPS 空转 memcpy (~280KB/帧)
+    /// 低占用零冗余快照拷贝（GUI 主线程专用）：仅当后台发布了新样本序号时才尝试非阻塞加锁拷贝，避免 60 FPS 空转 memcpy (~280KB/帧)
     pub fn tryCopySnapshotIfChanged(self: *MonitoringService, out: *SharedTelemetry, last_seq: *u64) bool {
         const cur = self.latest_seq_atomic.load(.acquire);
         if (cur == last_seq.*) return false;

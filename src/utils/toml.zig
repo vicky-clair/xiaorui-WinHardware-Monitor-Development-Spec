@@ -39,6 +39,7 @@ pub const Document = struct {
         self.arena.deinit();
     }
 
+    /// 解析 UTF-8 TOML 文本为只读键值文档，内部使用 ArenaAllocator 统一托管字符串生命周期
     pub fn parse(backing: std.mem.Allocator, input: []const u8) ParseError!Document {
         var doc = Document.init(backing);
         errdefer doc.deinit();
@@ -52,7 +53,7 @@ pub const Document = struct {
             const trimmed = std.mem.trim(u8, line_no_cr, " \t");
             if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
-            // Section header: [section] or [a.b]
+            // 节头解析：[section] 或 [section.sub]
             if (trimmed[0] == '[') {
                 const close_idx = std.mem.indexOfScalar(u8, trimmed, ']') orelse return error.InvalidSyntax;
                 const sec_raw = std.mem.trim(u8, trimmed[1..close_idx], " \t");
@@ -63,7 +64,7 @@ pub const Document = struct {
                 continue;
             }
 
-            // Key = Value
+            // 键值对解析：Key = Value
             const eq_idx = std.mem.indexOfScalar(u8, trimmed, '=') orelse return error.InvalidSyntax;
             const key_raw = std.mem.trim(u8, trimmed[0..eq_idx], " \t");
             if (key_raw.len == 0) return error.InvalidSyntax;

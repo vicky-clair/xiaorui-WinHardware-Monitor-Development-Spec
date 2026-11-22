@@ -1,12 +1,15 @@
-//! 跨平台无界面 CLI 硬件检测与准确基准测试入口（Windows & Linux 通用）。
+//! 跨平台无界面 CLI 硬件检测与系统友好型基准测试入口（Windows & Linux 通用）。
 //! 支持在无桌面的 Linux 服务器 / SSH 终端下运行实时硬件监测与准确烤机测试：
 //!   --cli / --info          输出完整真实硬件信息、传感器温度、物理磁盘与 21 条健康规则评估
-//!   --bench <cpu|mem|disk|all>  执行准确硬件稳定性与性能测试（内置高温熔断保护）
+//!   --lang <zh|en|ja>       指定输出语言（简体中文 / English / 日本語）
+//!   --bench <cpu|mem|disk|all>  执行系统友好型硬件稳定性与性能测试（低优先级 + 实时高温熔断保护）
 //!   --duration <秒>         CPU 测试时长（默认 10 秒）
-//!   --threads <数>          CPU 测试线程数（默认全部逻辑核心）
-//!   --mem-mb <MB>           内存位翻转校验容量（默认 128 MB）
+//!   --threads <数>          CPU 测试线程数（默认预留 1 个逻辑核心防卡顿）
+//!   --mem-mb <MB>           内存位翻转与延迟校验容量（默认 128 MB）
 //!   --disk-mb <MB>          磁盘文件级测试大小（默认 128 MB，仅受控临时文件并自动清理）
+//!   --disk-dir <目录>       自定义磁盘测速目标目录/盘符
 //!   --cutoff-c <°C>         高温自动熔断阈值（默认 90°C）
+//!   --no-gentle             关闭温和防卡顿让出（默认开启温和模式）
 const std = @import("std");
 const builtin = @import("builtin");
 const system_info = @import("providers/windows/system_info.zig");
@@ -40,9 +43,9 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
     try w.print("============================================================\n", .{});
     try w.print("{s} ({s} | {s})\n", .{
         i18n.trSlice(
-            "WinHardware Monitor V2.0 — 跨平台硬件检测与测试 CLI",
-            "WinHardware Monitor V2.0 — Cross-Platform Hardware CLI",
-            "WinHardware Monitor V2.0 — ハードウェア監視・テスト CLI",
+            "WinHardware Monitor V2.2 — 跨平台硬件检测与测试 CLI",
+            "WinHardware Monitor V2.2 — Cross-Platform Hardware CLI",
+            "WinHardware Monitor V2.2 — ハードウェア監視・テスト CLI",
         ),
         @tagName(builtin.os.tag),
         i18n.current().nativeName(),

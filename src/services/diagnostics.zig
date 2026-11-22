@@ -2,7 +2,8 @@ const std = @import("std");
 const monitoring = @import("monitoring.zig");
 const i18n = @import("../core/i18n.zig");
 
-/// 规范 §9 第 14 条 / §13：脱敏诊断报告导出（所有序列号均脱敏，绝不导出完整序列号）。
+/// 规范 §9 第 14 条 / §13：脱敏诊断报告导出（所有磁盘/内存序列号均脱敏为仅后 4 位，绝不导出完整序列号）。
+/// 输出语言自动跟随当前全局 `i18n` 语言设置（支持简体中文 / English / 日本語）。
 pub fn buildSanitizedDiagnosticsReport(
     allocator: std.mem.Allocator,
     tel: *const monitoring.SharedTelemetry,
@@ -13,6 +14,7 @@ pub fn buildSanitizedDiagnosticsReport(
     errdefer out.deinit(allocator);
     const w = out.writer(allocator);
 
+    // 1. 报告头与运行环境（权限级别、安装/便携模式）
     try w.print("# {s}\n", .{i18n.trSlice(
         "WinHardware Monitor 脱敏诊断报告",
         "WinHardware Monitor Sanitized Diagnostics Report",
@@ -22,6 +24,7 @@ pub fn buildSanitizedDiagnosticsReport(
     try w.print("{s}: {s}\n", .{ i18n.trSlice("运行权限", "Privilege", "実行権限"), if (is_admin) "Administrator" else "Standard User" });
     try w.print("{s}: {s}\n\n", .{ i18n.trSlice("部署模式", "Deployment", "配置モード"), if (is_portable) "Portable" else "Installed" });
 
+    // 2. 系统、CPU、内存与主板 SMBIOS（内存条序列号已脱敏）
     try w.print("## {s}\n", .{i18n.trSlice("系统与 CPU / 内存", "System, CPU & Memory", "システム・CPU・メモリ")});
     if (tel.has_system_sample) {
         try w.print("CPU: {s} ({d} {s}, Base {d} MHz)\n", .{

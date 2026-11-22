@@ -13,6 +13,7 @@ pub const AppPaths = struct {
     settings_file: []u8,
     db_file: []u8,
 
+    /// 释放全部动态分配的路径字符串内存
     pub fn deinit(self: *AppPaths) void {
         self.allocator.free(self.base_dir);
         self.allocator.free(self.config_dir);
@@ -22,6 +23,7 @@ pub const AppPaths = struct {
         self.allocator.free(self.db_file);
     }
 
+    /// 自动检测部署模式：程序同级目录存在 portable.flag 则进入便携模式，否则存入系统用户数据目录
     pub fn resolve(allocator: std.mem.Allocator) !AppPaths {
         const exe_dir = try getExeDirUtf8(allocator);
         defer allocator.free(exe_dir);
@@ -76,6 +78,7 @@ pub const AppPaths = struct {
         };
     }
 
+    /// 确保 config / data / logs 子目录已就绪（目录已存在时安全跳过）
     pub fn ensureDirectories(self: *const AppPaths) void {
         std.fs.makeDirAbsolute(self.base_dir) catch {};
         std.fs.makeDirAbsolute(self.config_dir) catch {};
@@ -84,6 +87,7 @@ pub const AppPaths = struct {
     }
 };
 
+/// 获取当前可执行文件所在目录的 UTF-8 绝对路径（Windows 经宽字符 API 转换以完整支持中文路径）
 fn getExeDirUtf8(allocator: std.mem.Allocator) ![]u8 {
     if (builtin.os.tag == .windows) {
         var wbuf: [1024]u16 = undefined;

@@ -15,6 +15,7 @@ pub const SingleInstance = struct {
         already_running,
     };
 
+    /// 尝试获取全局单实例锁（返回 primary 表示当前为首个实例，already_running 表示已有实例运行）
     pub fn acquire(self: *SingleInstance) AcquireResult {
         if (builtin.os.tag == .windows) {
             return self.acquireNamed(MUTEX_NAME);
@@ -22,6 +23,7 @@ pub const SingleInstance = struct {
         return self.acquirePosixLock("/tmp/winhardware-monitor-single-instance.lock");
     }
 
+    /// 按指定互斥体名获取 Windows 单实例锁（供正式运行与单元测试隔离使用）
     pub fn acquireNamed(self: *SingleInstance, name: win32.LPCWSTR) AcquireResult {
         if (builtin.os.tag != .windows) {
             return self.acquirePosixLock("/tmp/winhardware-monitor-unit-test.lock");
@@ -36,6 +38,7 @@ pub const SingleInstance = struct {
         return .primary;
     }
 
+    /// Linux 端采用非阻塞排他文件锁（flock）确保同一时间仅运行一个 GUI 实例
     fn acquirePosixLock(self: *SingleInstance, path: []const u8) AcquireResult {
         if (builtin.os.tag == .windows) return .primary;
         const file = std.fs.createFileAbsolute(path, .{ .truncate = false, .read = true }) catch return .primary;
@@ -48,6 +51,7 @@ pub const SingleInstance = struct {
         return .primary;
     }
 
+    /// 检测到已有实例时，将其主窗口从最小化/托盘恢复并置前激活
     pub fn activateExistingWindow() void {
         if (builtin.os.tag != .windows) return;
         if (win32.FindWindowW(null, WINDOW_TITLE)) |hwnd| {
@@ -60,6 +64,7 @@ pub const SingleInstance = struct {
         }
     }
 
+    /// 释放互斥体或文件锁句柄（退出程序或管理员重启交接前必须调用）
     pub fn release(self: *SingleInstance) void {
         if (builtin.os.tag == .windows) {
             if (self.mutex) |h| {

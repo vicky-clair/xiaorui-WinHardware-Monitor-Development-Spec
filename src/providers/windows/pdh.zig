@@ -23,6 +23,7 @@ pub const PdhCpuCollector = struct {
         disk_iops: ?f64 = null,
     };
 
+    /// 打开 PDH 查询并注册 CPU 性能及物理磁盘 I/O 英文计数器，同时执行首次预热采样
     pub fn init() PdhCpuCollector {
         var self = PdhCpuCollector{};
         if (win32.PdhOpenQueryW(null, 0, &self.query) != 0) {
@@ -47,6 +48,7 @@ pub const PdhCpuCollector = struct {
         return self;
     }
 
+    /// 关闭 PDH 查询句柄并清空所有计数器引用
     pub fn deinit(self: *PdhCpuCollector) void {
         if (self.query != null) {
             _ = win32.PdhCloseQuery(self.query);
@@ -59,6 +61,7 @@ pub const PdhCpuCollector = struct {
         }
     }
 
+    /// 执行一次差分采集并返回格式化后的 CPU 与磁盘吞吐指标（首次预热后生效）
     pub fn sample(self: *PdhCpuCollector) Sample {
         var out = Sample{};
         if (self.query == null) return out;

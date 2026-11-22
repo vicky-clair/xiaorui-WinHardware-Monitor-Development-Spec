@@ -34,6 +34,7 @@ pub const DimmInfo = struct {
         return self.serial_masked[0..self.serial_masked_len];
     }
 
+    /// 将 SMBIOS Type 17 内存类型字节映射为常见标准代际名称
     pub fn memoryTypeName(self: *const DimmInfo) []const u8 {
         return switch (self.memory_type) {
             0x18 => "DDR3",
@@ -45,11 +46,13 @@ pub const DimmInfo = struct {
         };
     }
 
+    /// 优先返回当前 BIOS 配置生效频率，未提供时回退到标称最大频率
     pub fn effectiveSpeedMhz(self: *const DimmInfo) u32 {
         return if (self.configured_speed_mhz > 0) self.configured_speed_mhz else self.speed_mhz;
     }
 };
 
+/// 完整 SMBIOS 解析结果（主板信息、CPU 标称频率及全部已插槽 DIMM 明细）
 pub const SmbiosData = struct {
     available: bool = false,
     major_version: u8 = 0,

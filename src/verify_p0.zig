@@ -1,3 +1,5 @@
+//! P0 阶段硬件接口与运行环境快速自检工具（`zig build verify-p0`）。
+//! 依次验证：进程权限、SQLite、TOML 解析器、物理磁盘枚举与 NVMe/ATA/温度描述符、GPU D3DKMT、以及 OpenGL 3.3 + zgui 渲染链路。
 const std = @import("std");
 const zglfw = @import("zglfw");
 const zopengl = @import("zopengl");
@@ -8,6 +10,7 @@ const sqlite = @import("database/sqlite.zig");
 
 const log = std.log.scoped(.verify_p0);
 
+/// 序列号脱敏辅助函数：仅保留末尾 4 位，防止诊断日志泄露完整硬件序列号
 fn maskSerial(serial: []const u8, buf: *[64]u8) []const u8 {
     const trimmed = std.mem.trim(u8, serial, " \t\r\n\x00");
     if (trimmed.len == 0) return "N/A";
@@ -16,6 +19,7 @@ fn maskSerial(serial: []const u8, buf: *[64]u8) []const u8 {
     return std.fmt.bufPrint(buf, "****{s}", .{last4}) catch "****";
 }
 
+/// 从 Win32 STORAGE_DEVICE_DESCRIPTOR 缓冲区指定偏移读取以空字符结尾的 ASCII 字符串
 fn readCStringAt(buf: []const u8, offset: u32) []const u8 {
     if (offset == 0 or offset >= buf.len) return "";
     const slice = buf[offset..];
@@ -23,6 +27,7 @@ fn readCStringAt(buf: []const u8, offset: u32) []const u8 {
     return std.mem.trim(u8, slice[0..nul], " \t\r\n");
 }
 
+/// 验证物理磁盘零权限枚举、NVMe SMART、存储温度描述符及 ATA 权限边界
 fn verifyStorage() void {
     std.debug.print("\n=== [4] 磁盘枚举、NVMe SMART、存储温度描述符、ATA 检测 ===\n", .{});
     var found: usize = 0;

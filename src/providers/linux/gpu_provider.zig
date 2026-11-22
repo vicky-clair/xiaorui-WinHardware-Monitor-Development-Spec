@@ -1,19 +1,22 @@
-//! Linux GPU 采集 Provider（`/sys/class/drm/card*` 原生 sysfs + 可选动态加载 `libnvidia-ml.so.1`）。
-//! 支持 AMD (`amdgpu` hwmon/busy/VRAM)、Intel (`i915`/`xe` sysfs) 与 NVIDIA（动态 NVML），
-//! 所有无法读取的传感器均诚实保持 null / .unsupported，绝不伪造数据。
+//! Linux GPU 采集 Provider（原生 `/sys/class/drm/card*` sysfs + 下属 `hwmon` 接口）。
+//! 支持枚举 AMD / Intel / NVIDIA PCI 显示设备并读取驱动暴露的使用率、显存、温度、功耗与风扇转速；
+//! 所有内核未暴露的指标均诚实保持 `null` / `.unsupported`，绝不伪造数据。
 const std = @import("std");
-const sensor = @import("../../core/sensor.zig");
 const win_gpu = @import("../windows/gpu_provider.zig");
 
+/// Linux DRM/sysfs GPU 采集器（复用跨平台 `GpuSnapshot` 结构）
 pub const LinuxGpuProvider = struct {
+    /// 初始化采集器（无状态、无需内核驱动或额外权限）
     pub fn init() LinuxGpuProvider {
         return .{};
     }
 
+    /// 释放资源（无持久句柄）
     pub fn deinit(self: *LinuxGpuProvider) void {
         _ = self;
     }
 
+    /// 遍历 `/sys/class/drm/card*` 采集全部显卡的 PCI 信息与实时指标
     pub fn collect(self: *LinuxGpuProvider) win_gpu.GpuSnapshot {
         _ = self;
         var snap = win_gpu.GpuSnapshot{

@@ -37,6 +37,7 @@ pub fn launchLhmHelperAsAdministrator(allocator: std.mem.Allocator, parent_hwnd:
 
     const exe_dir = std.fs.path.dirname(exe_utf8) orelse return .not_found;
 
+    // 优先查找主程序同目录，其次兼容开发环境相对路径
     const candidates = [_][]const u8{
         "WinHardwareMonitor.LhmHelper.exe",
         "helpers\\lhm_bridge\\WinHardwareMonitor.LhmHelper.exe",
@@ -53,6 +54,7 @@ pub fn launchLhmHelperAsAdministrator(allocator: std.mem.Allocator, parent_hwnd:
         const dir_w = std.unicode.utf8ToUtf16LeAllocZ(allocator, exe_dir) catch null;
         defer if (dir_w) |dw| allocator.free(dw);
 
+        // 传入 --from-host 静默后台启动辅助进程，避免弹出独立双击提示框
         const verb = std.unicode.utf8ToUtf16LeStringLiteral("runas");
         const helper_params = std.unicode.utf8ToUtf16LeStringLiteral("--from-host");
         const res = win32.ShellExecuteW(
@@ -64,6 +66,7 @@ pub fn launchLhmHelperAsAdministrator(allocator: std.mem.Allocator, parent_hwnd:
             win32.SW_HIDE,
         );
         if (res) |h| {
+            // ShellExecuteW 返回值 > 32 表示成功拉起提权进程
             if (@intFromPtr(h) > 32) return .launched;
         }
         return .cancelled;

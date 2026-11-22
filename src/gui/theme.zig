@@ -32,6 +32,7 @@ pub const ThemeColors = struct {
     btn_active: [4]f32,
     row_alt: [4]f32,
 
+    /// 将磁盘健康级别映射为语义状态色（同时界面必配文字标签，绝不单靠颜色区分）
     pub fn healthColor(self: ThemeColors, level: sensor.HealthLevel) [4]f32 {
         return switch (level) {
             .normal => self.status_ok,
@@ -42,6 +43,7 @@ pub const ThemeColors = struct {
         };
     }
 
+    /// 将传感器采集状态映射为对应视觉色
     pub fn sensorStatusColor(self: ThemeColors, st: sensor.SensorStatus) [4]f32 {
         return switch (st) {
             .ok => self.status_ok,
@@ -116,10 +118,12 @@ pub const LIGHT_COLORS = ThemeColors{
 var current_colors: ThemeColors = DARK_COLORS;
 var style_scaled_once: bool = false;
 
+/// 获取当前生效主题调色板
 pub fn active() *const ThemeColors {
     return &current_colors;
 }
 
+/// 将 24 位 RGB 十六进制颜色值与透明度转为 Dear ImGui RGBA 浮点数组
 pub fn hex(comptime rgb: u24, alpha: f32) [4]f32 {
     const r: f32 = @as(f32, @floatFromInt((rgb >> 16) & 0xFF)) / 255.0;
     const g: f32 = @as(f32, @floatFromInt((rgb >> 8) & 0xFF)) / 255.0;
@@ -127,10 +131,12 @@ pub fn hex(comptime rgb: u24, alpha: f32) [4]f32 {
     return .{ r, g, b, alpha };
 }
 
+/// 将 RGBA 浮点色转为 DrawList 所需的紧凑 u32 色值
 pub fn colorU32(c: [4]f32) u32 {
     return zgui.colorConvertFloat4ToU32(c);
 }
 
+/// 应用深色 / 浅色主题到 Dear ImGui 全局样式（DPI 缩放仅在首次初始化时执行，避免重复放大）
 pub fn applyTheme(mode: ThemeMode, dpi_scale: f32) void {
     current_colors = switch (mode) {
         .dark => DARK_COLORS,
