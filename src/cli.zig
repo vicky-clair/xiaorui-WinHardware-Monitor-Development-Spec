@@ -26,7 +26,9 @@ pub const CliOptions = struct {
     threads: u32 = 0,
     mem_mb: u32 = 128,
     disk_mb: u32 = 128,
+    disk_dir: []const u8 = "",
     cutoff_c: f64 = 90.0,
+    gentle_mode: bool = true,
 };
 
 pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
@@ -203,25 +205,35 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
         defer runner.deinit();
 
         const run_all = std.ascii.eqlIgnoreCase(opts.bench_target, "all");
+        const safe_default_t: u32 = if (sys.logical_cores > 1) sys.logical_cores - 1 else 1;
         const cfg = benchmarks.BenchmarkConfig{
-            .cpu_threads = if (opts.threads > 0) opts.threads else @max(sys.logical_cores, 1),
+            .cpu_threads = if (opts.threads > 0) opts.threads else safe_default_t,
             .duration_s = opts.duration_s,
             .thermal_cutoff_c = opts.cutoff_c,
             .mem_size_mb = opts.mem_mb,
             .disk_file_mb = opts.disk_mb,
+            .gentle_mode = opts.gentle_mode,
         };
 
         if (run_all or std.ascii.eqlIgnoreCase(opts.bench_target, "cpu")) {
-            try w.print("\n[1/3] {s} ({d}T, {d}s, cutoff {d:.0}°C)...\n", .{
-                benchmarks.TestKind.cpu_stress.labelZh(), cfg.cpu_threads, cfg.duration_s, cfg.thermal_cutoff_c,
+            try w.print("\n[1/3] {s} ({d}T, {d}s, cutoff {d:.0}°C, gentle={})...\n", .{
+                benchmarks.TestKind.cpu_stress.labelZh(), cfg.cpu_threads, cfg.duration_s, cfg.thermal_cutoff_c, cfg.gentle_mode,
             });
             try w.flush();
             if (runner.startCpuStress(cfg)) {
                 waitWithThermalGuard(&runner);
                 const snap = runner.copySnapshot();
-                try w.print("  {s}: {s} | {d:.2} MOPS | Errors={d} | Peak={?d:.1}°C\n", .{
-                    i18n.trSlice("结果", "Result", "結果"), snap.outcome.labelZh(), snap.cpu_score_mops, snap.error_count, snap.peak_temp_c,
+                try w.print("  {s}: {s} | 1T {d:.2} MOPS / MT {d:.2} MOPS ({d:.2}x) | ThrottleDrop={d:.1}% | Errors={d} | Peak={?d:.1}°C\n", .{
+                    i18n.trSlice("结果", "Result", "結果"),
+                    snap.outcome.labelZh(),
+                    snap.cpu_single_mops,
+                    snap.cpu_score_mops,
+                    snap.cpu_scaling_ratio,
+                    snap.cpu_throttle_drop_pct,
+                    snap.error_count,
+                    snap.peak_temp_c,
                 });
+                try w.print("  {s}: {s}\n", .{ i18n.trSlice("建议", "Advice", "診断"), snap.diagnosticAdvice() });
             }
         }
 
@@ -231,9 +243,19 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
             if (runner.startMemoryVerify(cfg, sys.mem_avail_bytes)) {
                 waitWithThermalGuard(&runner);
                 const snap = runner.copySnapshot();
-                try w.print("  {s}: {s} | {d}/4 | W {d:.2} GB/s | R+Verify {d:.2} GB/s | Errors={d}\n", .{
-                    i18n.trSlice("结果", "Result", "結果"), snap.outcome.labelZh(), snap.mem_passes_done, snap.mem_write_gbs, snap.mem_read_gbs, snap.error_count,
+                try w.print("  {s}: {s} | {d}/4 | W {d:.2} / R {d:.2} / MT-Copy {d:.2} GB/s | Errors={d}\n", .{
+                    i18n.trSlice("结果", "Result", "結果"),
+                    snap.outcome.labelZh(),
+                    snap.mem_passes_done,
+                    snap.mem_write_gbs,
+                    snap.mem_read_gbs,
+                    snap.mem_copy_gbs,
+                    snap.error_count,
                 });
+                try w.print("  Latency: L1={d:.2}ns | L2={d:.2}ns | L3={d:.2}ns | RAM={d:.2}ns\n", .{
+                    snap.mem_lat_l1_ns, snap.mem_lat_l2_ns, snap.mem_lat_l3_ns, snap.mem_lat_ram_ns,
+                });
+                try w.print("  {s}: {s}\n", .{ i18n.trSlice("建议", "Advice", "診断"), snap.diagnosticAdvice() });
             }
         }
 
@@ -241,14 +263,32 @@ pub fn runCli(allocator: std.mem.Allocator, opts: CliOptions) !void {
             var paths = try paths_mod.AppPaths.resolve(allocator);
             defer paths.deinit();
             paths.ensureDirectories();
-            try w.print("\n[3/3] {s} ({d} MB -> {s})...\n", .{ benchmarks.TestKind.disk_bench.labelZh(), cfg.disk_file_mb, paths.logs_dir });
+            const target_dir = if (opts.disk_dir.len > 0) opts.disk_dir else paths.logs_dir;
+            try w.print("\n[3/3] {s} ({d} MB -> {s})...\n", .{ benchmarks.TestKind.disk_bench.labelZh(), cfg.disk_file_mb, target_dir });
             try w.flush();
-            if (runner.startDiskBench(cfg, paths.logs_dir)) {
+            if (runner.startDiskBench(cfg, target_dir)) {
                 waitWithThermalGuard(&runner);
                 const snap = runner.copySnapshot();
-                try w.print("  {s}: {s} | SEQ1M W {d:.1} MB/s / R {d:.1} MB/s | RND4K R {d:.1} MB/s ({d:.0} IOPS, {d:.1} us)\n", .{
-                    i18n.trSlice("结果", "Result", "結果"), snap.outcome.labelZh(), snap.disk_seq_write_mbs, snap.disk_seq_read_mbs, snap.disk_rnd4k_read_mbs, snap.disk_rnd4k_read_iops, snap.disk_rnd4k_avg_lat_us,
+                try w.print("  {s}: {s} | SEQ1M W {d:.1} / R {d:.1} MB/s | IntegrityErrors={d}\n", .{
+                    i18n.trSlice("结果", "Result", "結果"),
+                    snap.outcome.labelZh(),
+                    snap.disk_seq_write_mbs,
+                    snap.disk_seq_read_mbs,
+                    snap.disk_integrity_errors,
                 });
+                try w.print("  RND4K R {d:.1} MB/s ({d:.0} IOPS, Min/Avg/P95/P99/Max={d:.0}/{d:.0}/{d:.0}/{d:.0}/{d:.0} us)\n", .{
+                    snap.disk_rnd4k_read_mbs,
+                    snap.disk_rnd4k_read_iops,
+                    snap.disk_rnd4k_min_lat_us,
+                    snap.disk_rnd4k_avg_lat_us,
+                    snap.disk_rnd4k_p95_lat_us,
+                    snap.disk_rnd4k_p99_lat_us,
+                    snap.disk_rnd4k_max_lat_us,
+                });
+                try w.print("  RND4K W {d:.1} MB/s ({d:.0} IOPS, P99={d:.0} us)\n", .{
+                    snap.disk_rnd4k_write_mbs, snap.disk_rnd4k_write_iops, snap.disk_rnd4k_write_p99_us,
+                });
+                try w.print("  {s}: {s}\n", .{ i18n.trSlice("建议", "Advice", "診断"), snap.diagnosticAdvice() });
             }
         }
     }

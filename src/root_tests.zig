@@ -35,6 +35,7 @@ test {
     // 平台封装、配置服务与状态机
     _ = @import("platform/single_instance.zig");
     _ = @import("platform/tray.zig");
+    _ = @import("platform/autostart.zig");
     _ = @import("platform/paths.zig");
     _ = @import("services/configuration.zig");
     _ = @import("services/diagnostics.zig");

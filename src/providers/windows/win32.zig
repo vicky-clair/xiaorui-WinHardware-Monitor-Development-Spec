@@ -43,6 +43,8 @@ pub const OPEN_EXISTING: DWORD = 3;
 pub const FILE_FLAG_NO_BUFFERING: DWORD = 0x20000000;
 pub const FILE_FLAG_WRITE_THROUGH: DWORD = 0x80000000;
 pub const FILE_BEGIN: DWORD = 0;
+pub const THREAD_PRIORITY_BELOW_NORMAL: i32 = -1;
+pub const THREAD_PRIORITY_LOWEST: i32 = -2;
 
 // Storage IOCTLs (winioctl.h / ntddscsi.h)
 pub const IOCTL_STORAGE_QUERY_PROPERTY: DWORD = 0x002D1400;
@@ -399,14 +401,15 @@ pub const SYSTEM_INFO = extern struct {
     wProcessorRevision: WORD = 0,
 };
 
-// Registry constants
+// Registry constants (Windows x64 SDK: (HKEY)(ULONG_PTR)(LONG)0x80000001 => sign-extended)
 pub const HKEY = *opaque {};
-pub const HKEY_CURRENT_USER: HKEY = @ptrFromInt(0x80000001);
-pub const HKEY_LOCAL_MACHINE: HKEY = @ptrFromInt(0x80000002);
+pub const HKEY_CURRENT_USER: HKEY = @ptrFromInt(@as(usize, @bitCast(@as(isize, -2147483647))));
+pub const HKEY_LOCAL_MACHINE: HKEY = @ptrFromInt(@as(usize, @bitCast(@as(isize, -2147483646))));
 pub const KEY_READ: DWORD = 0x20019;
 pub const KEY_SET_VALUE: DWORD = 0x0002;
 pub const KEY_WRITE: DWORD = 0x20006;
 pub const REG_SZ: DWORD = 1;
+pub const REG_BINARY: DWORD = 3;
 pub const REG_DWORD: DWORD = 4;
 
 // SMBIOS firmware table provider ('RSMB' little-endian = 0x52534D42)
@@ -593,6 +596,14 @@ pub extern "kernel32" fn GetSystemTimes(
     lpUserTime: ?*FILETIME,
 ) callconv(.winapi) BOOL;
 pub extern "kernel32" fn GetCurrentProcess() callconv(.winapi) HANDLE;
+pub extern "kernel32" fn GetCurrentThread() callconv(.winapi) HANDLE;
+pub extern "kernel32" fn SetThreadPriority(hThread: HANDLE, nPriority: i32) callconv(.winapi) BOOL;
+pub extern "kernel32" fn GetDiskFreeSpaceExW(
+    lpDirectoryName: ?LPCWSTR,
+    lpFreeBytesAvailableToCaller: ?*u64,
+    lpTotalNumberOfBytes: ?*u64,
+    lpTotalNumberOfFreeBytes: ?*u64,
+) callconv(.winapi) BOOL;
 pub extern "kernel32" fn GetModuleHandleW(lpModuleName: ?LPCWSTR) callconv(.winapi) ?HMODULE;
 pub extern "kernel32" fn LoadLibraryW(lpLibFileName: LPCWSTR) callconv(.winapi) ?HMODULE;
 pub extern "kernel32" fn FreeLibrary(hLibModule: HMODULE) callconv(.winapi) BOOL;

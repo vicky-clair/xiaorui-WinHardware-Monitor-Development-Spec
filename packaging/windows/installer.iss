@@ -64,6 +64,10 @@ Name: "{autodesktop}\WinHardware Monitor"; Filename: "{app}\winhardware-monitor.
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: unchecked
+Name: "autostart"; Description: "开机自动启动（登录 Windows 后静默驻留系统托盘）"; GroupDescription: "附加任务:"; Flags: unchecked
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WinHardwareMonitor"; ValueData: """{app}\winhardware-monitor.exe"" --autostart"; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\winhardware-monitor.exe"; Description: "启动 WinHardware Monitor"; Flags: nowait postinstall skipifsilent

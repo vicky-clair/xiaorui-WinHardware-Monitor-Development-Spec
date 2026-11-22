@@ -17,6 +17,7 @@ pub fn main() !void {
     // 解析命令行参数
     var smoke_test = false;
     var wait_mutex = false;
+    var is_autostart = false;
     var run_cli = false;
     var cli_opts = cli.CliOptions{};
 
@@ -28,6 +29,8 @@ pub fn main() !void {
             smoke_test = true;
         } else if (std.mem.eql(u8, arg, "--wait-mutex")) {
             wait_mutex = true;
+        } else if (std.mem.eql(u8, arg, "--autostart")) {
+            is_autostart = true;
         } else if (std.mem.eql(u8, arg, "--cli") or std.mem.eql(u8, arg, "--info")) {
             run_cli = true;
             cli_opts.show_info = true;
@@ -44,6 +47,10 @@ pub fn main() !void {
             if (args.next()) |v| cli_opts.disk_mb = std.fmt.parseInt(u32, v, 10) catch 128;
         } else if (std.mem.eql(u8, arg, "--cutoff-c")) {
             if (args.next()) |v| cli_opts.cutoff_c = std.fmt.parseFloat(f64, v) catch 90.0;
+        } else if (std.mem.eql(u8, arg, "--disk-dir")) {
+            if (args.next()) |v| cli_opts.disk_dir = v;
+        } else if (std.mem.eql(u8, arg, "--no-gentle")) {
+            cli_opts.gentle_mode = false;
         } else if (std.mem.eql(u8, arg, "--lang")) {
             if (args.next()) |v| i18n.setLanguage(i18n.Language.fromCode(v));
         }
@@ -76,8 +83,14 @@ pub fn main() !void {
         }
     }
 
+    // 开机自启时短暂等待 Windows 资源管理器（托盘）与显卡 OpenGL 驱动就绪，避免登录瞬间启动失败或漏挂托盘
+    if (is_autostart and !smoke_test) {
+        std.Thread.sleep(2000 * std.time.ns_per_ms);
+    }
+
     try window.runMainWindow(allocator, .{
         .smoke_test = smoke_test,
+        .start_minimized = is_autostart,
         .single_instance = if (smoke_test) null else &single,
     });
 }

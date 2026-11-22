@@ -21,9 +21,12 @@ const diagnostics = @import("../services/diagnostics.zig");
 const benchmarks = @import("../core/benchmarks.zig");
 const ata_smart = @import("../collectors/storage/ata_smart.zig");
 const i18n = @import("../core/i18n.zig");
+const gpu_shader = @import("gpu_shader.zig");
+const repository = @import("../database/repository.zig");
 
 pub const RunOptions = struct {
     smoke_test: bool = false,
+    start_minimized: bool = false,
     single_instance: ?*SingleInstance = null,
 };
 
@@ -168,6 +171,14 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         .desktop_notifications = config.desktop_notifications,
     };
     config.applyToState(&state);
+    // 同步真实系统开机自启状态：若配置开启则确保注册表路径指向当前程序，若系统已开启则回显真实状态
+    if (!opts.smoke_test) {
+        if (state.start_with_windows) {
+            _ = autostart.setAutoStart(true);
+        } else if (autostart.isAutoStartEnabled()) {
+            state.start_with_windows = true;
+        }
+    }
     var applied_theme = state.theme_mode;
     var applied_language = state.language;
     var synced_paused = state.monitoring_paused;
@@ -176,6 +187,18 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     var synced_wake = state.allow_wake_standby_disk;
     var synced_ext = state.extension_enabled;
     var last_copied_seq: u64 = 0;
+    var last_saved_bench_run_id: u64 = 0;
+    var last_disk_space_check_ns: i128 = 0;
+
+    // 初始化磁盘测速默认目标目录为 logs_dir（支持用户自由修改为任意盘符/目录）
+    {
+        const n = @min(state.bench_disk_dir.len - 1, paths.logs_dir.len);
+        @memcpy(state.bench_disk_dir[0..n], paths.logs_dir[0..n]);
+        state.bench_disk_dir[n] = 0;
+    }
+
+    var shader_stress = gpu_shader.GpuStressShader{};
+    defer shader_stress.deinit();
 
     if (msg_wnd.tray.added) {
         msg_wnd.tray.updateTooltip(i18n.tr(
@@ -313,9 +336,10 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             }
         }
 
-        // V2: 主动硬件测试控制与实时高温熔断保护
+        // V2.2: 主动硬件测试控制、空间检查与实时温度/功耗熔断保护
         {
             var live_max_t: ?f64 = null;
+            var live_gpu_pwr: ?f64 = null;
             if (ui_snapshot.extension.connected) {
                 if (ui_snapshot.extension.cpu_package_temp_c) |ct| live_max_t = ct;
             }
@@ -323,8 +347,18 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                 if (ui_snapshot.gpu.gpus[0].temp_c) |gt| {
                     if (live_max_t == null or gt > live_max_t.?) live_max_t = gt;
                 }
+                live_gpu_pwr = ui_snapshot.gpu.gpus[0].power_watts;
             }
-            bench.updateLiveTemperature(live_max_t);
+            bench.updateLiveTelemetry(live_max_t, live_gpu_pwr);
+        }
+        // 仅在位于「硬件测试」页时每 2 秒刷新一次目标盘剩余空间（平时零 I/O）
+        if (state.current_page == .stress_test) {
+            const now_sp = std.time.nanoTimestamp();
+            if (now_sp - last_disk_space_check_ns >= 2 * std.time.ns_per_s) {
+                last_disk_space_check_ns = now_sp;
+                const dir_slice = std.mem.sliceTo(&state.bench_disk_dir, 0);
+                state.bench_disk_free_bytes = benchmarks.queryDirFreeBytes(if (dir_slice.len > 0) dir_slice else paths.logs_dir);
+            }
         }
         if (state.request_stop_bench) {
             state.request_stop_bench = false;
@@ -336,11 +370,12 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             if (!opts.smoke_test) {
                 const ok = bench.startCpuStress(.{
                     .cpu_threads = @intCast(@max(state.bench_cpu_threads, 1)),
-                    .duration_s = @intCast(@max(state.bench_duration_s, 5)),
+                    .duration_s = @intCast(@max(state.bench_duration_s, 6)),
                     .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
+                    .gentle_mode = state.bench_gentle_mode,
                 });
                 state.bench_msg = if (ok)
-                    i18n.tr("CPU 稳定性与算力校验已启动", "CPU stability & compute test started", "CPU 安定性・演算テストを開始しました")
+                    i18n.tr("CPU 单核/多核与降频测试已启动（低优先级防卡顿）", "CPU Single/Multi & throttle test started (low priority)", "CPU シングル/マルチ検証を開始（低優先度保護）")
                 else
                     i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
             }
@@ -349,11 +384,13 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             state.request_start_mem_bench = false;
             if (!opts.smoke_test) {
                 const ok = bench.startMemoryVerify(.{
+                    .cpu_threads = @intCast(@max(state.bench_cpu_threads, 1)),
                     .mem_size_mb = @intCast(@max(state.bench_mem_mb, 32)),
                     .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
+                    .gentle_mode = state.bench_gentle_mode,
                 }, ui_snapshot.system.mem_avail_bytes);
                 state.bench_msg = if (ok)
-                    i18n.tr("4 轮内存位翻转与带宽校验已启动", "4-pass memory verification started", "4パス メモリ検証を開始しました")
+                    i18n.tr("内存延迟、多核带宽与 4 轮位翻转校验已启动", "Memory latency, MT Copy & 4-pass verify started", "メモリ遅延・帯域・4パス検証を開始しました")
                 else
                     i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
             }
@@ -365,12 +402,15 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                     state.bench_msg = i18n.tr("请先勾选下方安全确认项后再执行磁盘写入基准测试", "Please check the safety confirmation before starting disk benchmark", "ディスクテスト開始前に下の安全確認にチェックを入れてください");
                 } else {
                     paths.ensureDirectories();
+                    const dir_slice = std.mem.sliceTo(&state.bench_disk_dir, 0);
+                    const target_dir = if (dir_slice.len > 0) dir_slice else paths.logs_dir;
                     const ok = bench.startDiskBench(.{
                         .disk_file_mb = @intCast(@max(state.bench_disk_mb, 32)),
                         .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
-                    }, paths.logs_dir);
+                        .gentle_mode = state.bench_gentle_mode,
+                    }, target_dir);
                     state.bench_msg = if (ok)
-                        i18n.tr("无缓存文件级磁盘基准测试已启动（结束后自动删除临时文件）", "Unbuffered disk benchmark started (temp file auto-deleted)", "キャッシュ無効ディスクテストを開始（終了後自動削除）")
+                        i18n.tr("无缓存磁盘读写与完整性校验已启动（结束后自动清理）", "Unbuffered disk R/W & integrity check started (auto-deleted)", "無キャッシュディスク計測・整合性検証を開始（終了後自動削除）")
                     else
                         i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
                 }
@@ -382,9 +422,52 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
                 const ok = bench.startGpuStress(.{
                     .duration_s = @intCast(@max(state.bench_duration_s, 10)),
                     .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
+                    .gentle_mode = state.bench_gentle_mode,
+                    .gpu_intensity = state.bench_gpu_intensity,
                 });
                 state.bench_msg = if (ok)
-                    i18n.tr("GPU OpenGL 稳定性烤机已启动", "GPU OpenGL stress test started", "GPU OpenGL 負荷テストを開始しました")
+                    i18n.tr("GPU OpenGL 3.3 离屏着色器烤机已启动", "GPU OpenGL 3.3 shader stress started", "GPU OpenGL 3.3 シェーダー負荷テストを開始しました")
+                else
+                    i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
+            }
+        }
+        if (state.request_start_combined_bench) {
+            state.request_start_combined_bench = false;
+            if (!opts.smoke_test) {
+                const ok = bench.startCombinedStress(.{
+                    .cpu_threads = @intCast(@max(state.bench_cpu_threads, 1)),
+                    .duration_s = @intCast(@max(state.bench_duration_s, 10)),
+                    .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
+                    .gentle_mode = true,
+                    .gpu_intensity = @min(state.bench_gpu_intensity, 1), // 联烤自动限制着色器不超过均衡档防桌面卡顿
+                });
+                state.bench_msg = if (ok)
+                    i18n.tr("整机安全联烤 (CPU+内存+GPU) 已启动（已自动预留系统核心）", "Combined Safe Stress started (OS headroom reserved)", "総合安全負荷テストを開始（OS 用コアを自動確保）")
+                else
+                    i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
+            }
+        }
+        if (state.request_start_full_suite) {
+            state.request_start_full_suite = false;
+            if (!opts.smoke_test) {
+                paths.ensureDirectories();
+                const dir_slice = std.mem.sliceTo(&state.bench_disk_dir, 0);
+                const target_dir = if (dir_slice.len > 0) dir_slice else paths.logs_dir;
+                const ok = bench.startFullSuite(.{
+                    .cpu_threads = @intCast(@max(state.bench_cpu_threads, 1)),
+                    .duration_s = @intCast(@max(state.bench_duration_s, 10)),
+                    .thermal_cutoff_c = @floatFromInt(state.bench_thermal_cutoff_c),
+                    .mem_size_mb = @intCast(@max(state.bench_mem_mb, 32)),
+                    .disk_file_mb = @intCast(@max(state.bench_disk_mb, 32)),
+                    .gentle_mode = state.bench_gentle_mode,
+                    .gpu_intensity = state.bench_gpu_intensity,
+                    .include_disk_in_suite = state.bench_disk_confirmed,
+                }, ui_snapshot.system.mem_avail_bytes, target_dir, true);
+                state.bench_msg = if (ok)
+                    (if (state.bench_disk_confirmed)
+                        i18n.tr("一键全套综合体检已启动（CPU → 内存 → 磁盘 → GPU）", "Full Diagnostic Suite started (CPU -> RAM -> Disk -> GPU)", "ワンクリック総合診断を開始（CPU → RAM → Disk → GPU）")
+                    else
+                        i18n.tr("一键全套体检已启动（未勾选磁盘确认，将执行 CPU → 内存 → GPU）", "Full Diagnostic started (CPU -> RAM -> GPU; disk skipped until confirmed)", "総合診断を開始（ディスク未確認のため CPU → RAM → GPU を実行）"))
                 else
                     i18n.tr("已有测试正在运行", "Another test is already running", "他のテストが実行中です");
             }
@@ -479,10 +562,24 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             config.smart_interval_ms = state.smart_interval_ms;
             config.allow_wake_standby_disk = state.allow_wake_standby_disk;
             if (!opts.smoke_test) {
-                _ = autostart.setAutoStart(config.start_with_windows);
+                const autostart_ok = autostart.setAutoStart(config.start_with_windows);
                 paths.ensureDirectories();
                 if (config.saveFile(allocator, paths.settings_file)) |_| {
-                    state.config_save_msg = i18n.tr("配置已保存", "Configuration saved", "設定を保存しました");
+                    if (!autostart_ok) {
+                        state.config_save_msg = i18n.tr(
+                            "配置已保存，但写入开机自启注册表失败（请检查安全软件拦截）",
+                            "Config saved, but autostart registry write failed (check antivirus)",
+                            "設定保存済・自動起動レジストリ書込失敗（セキュリティソフトを確認）",
+                        );
+                    } else if (config.start_with_windows) {
+                        state.config_save_msg = i18n.tr(
+                            "配置已保存（开机自启已写入系统注册表）",
+                            "Configuration saved (Autostart registered)",
+                            "設定を保存しました（自動起動を登録済）",
+                        );
+                    } else {
+                        state.config_save_msg = i18n.tr("配置已保存", "Configuration saved", "設定を保存しました");
+                    }
                 } else |_| {
                     state.config_save_msg = i18n.tr("保存失败，请检查目录权限", "Save failed; check directory permissions", "保存失敗（フォルダ権限を確認）");
                 }
@@ -645,15 +742,56 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         // 7. 低占用绝对非阻塞快照同步：仅在 sample_seq 变化时拷贝一次（内存拷贝量降低 ~120 倍）
         if (monitor.tryCopySnapshotIfChanged(ui_snapshot, &last_copied_seq)) {
             state.active_alert_count = ui_snapshot.active_alert_count;
-            if (ui_snapshot.has_system_sample and state.bench_cpu_threads == 4 and ui_snapshot.system.logical_cores > 0) {
-                state.bench_cpu_threads = @intCast(ui_snapshot.system.logical_cores);
+            if (ui_snapshot.has_system_sample and !state.bench_threads_initialized and ui_snapshot.system.logical_cores > 0) {
+                // 默认预留 1 个逻辑核给操作系统与前台进程，确保测试期间绝不卡顿
+                const safe_def: u32 = if (ui_snapshot.system.logical_cores > 1) ui_snapshot.system.logical_cores - 1 else 1;
+                state.bench_cpu_threads = @intCast(safe_def);
+                state.bench_threads_initialized = true;
             }
         }
         const bench_snap = bench.copySnapshot();
         if (bench_snap.outcome == .running) {
             g_input_activity.store(true, .release);
+        } else if (!opts.smoke_test and bench_snap.run_id != 0 and bench_snap.run_id != last_saved_bench_run_id and bench_snap.outcome != .idle) {
+            // 测试刚结束：自动异步归档至本地 SQLite 历史表，供优化前后成绩对比
+            last_saved_bench_run_id = bench_snap.run_id;
+            var p_buf: [96]u8 = undefined;
+            var s_buf: [96]u8 = undefined;
+            const hs = bench_snap.formatHistorySummary(&p_buf, &s_buf);
+            var rec = repository.BenchmarkHistoryRecord{
+                .timestamp_utc_ms = std.time.milliTimestamp(),
+                .duration_s = bench_snap.elapsed_s,
+                .error_count = bench_snap.error_count,
+                .peak_temp_c = bench_snap.peak_temp_c,
+            };
+            const k_s = bench_snap.last_kind.code();
+            @memcpy(rec.test_kind[0..k_s.len], k_s);
+            rec.test_kind_len = k_s.len;
+            const o_s = bench_snap.outcome.code();
+            @memcpy(rec.outcome[0..o_s.len], o_s);
+            rec.outcome_len = o_s.len;
+            @memcpy(rec.primary_metric[0..hs.primary.len], hs.primary);
+            rec.primary_metric_len = hs.primary.len;
+            @memcpy(rec.secondary_metric[0..hs.secondary.len], hs.secondary);
+            rec.secondary_metric_len = hs.secondary.len;
+            monitor.recordBenchmarkHistory(rec);
         }
-        _ = bench.tickGpuStressFrame();
+
+        // OpenGL 3.3 离屏着色器按需驱动（仅 GPU 烤机/联烤/体检第4步激活，结束立即释放显存零负担）
+        if (bench_snap.gpu_shader_active and !opts.smoke_test) {
+            if (shader_stress.ensureReady(bench_snap.gpu_intensity)) {
+                shader_stress.renderFrame(bench_snap.elapsed_s);
+                state.bench_gpu_tex_id = shader_stress.textureId();
+            } else {
+                state.bench_gpu_tex_id = 0;
+            }
+            _ = bench.tickGpuStressFrame();
+        } else {
+            if (shader_stress.ready) {
+                shader_stress.deinit();
+            }
+            state.bench_gpu_tex_id = 0;
+        }
 
         gl.viewport(0, 0, fb[0], fb[1]);
         const bg = theme.active().canvas_bg;
@@ -703,12 +841,17 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         zgui.backend.draw();
         window.swapBuffers();
 
-        // 首帧渲染完成后再显示窗口，彻底杜绝管理员或普通用户启动时的白屏/白闪
+        // 首帧渲染完成后再显示窗口（若以 --autostart 开机自启且托盘可用，则静默驻留托盘不打扰开机）
         if (!window_shown and !opts.smoke_test) {
-            window.show();
-            window.focus();
             window_shown = true;
-            g_input_activity.store(true, .release);
+            if (opts.start_minimized and state.tray_available) {
+                window.hide();
+                state.in_tray = true;
+            } else {
+                window.show();
+                window.focus();
+                g_input_activity.store(true, .release);
+            }
         }
 
         state.rendered_frames += 1;

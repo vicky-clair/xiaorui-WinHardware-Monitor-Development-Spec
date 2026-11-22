@@ -36,6 +36,36 @@ pub const AlertRecord = struct {
     }
 };
 
+/// V2.2 硬件基准测试历史记录（用于清灰/调 XMP/换盘前后成绩对比）
+pub const BenchmarkHistoryRecord = struct {
+    id: i64 = 0,
+    timestamp_utc_ms: i64 = 0,
+    test_kind: [24]u8 = std.mem.zeroes([24]u8),
+    test_kind_len: usize = 0,
+    outcome: [24]u8 = std.mem.zeroes([24]u8),
+    outcome_len: usize = 0,
+    duration_s: f64 = 0.0,
+    error_count: u64 = 0,
+    peak_temp_c: ?f64 = null,
+    primary_metric: [96]u8 = std.mem.zeroes([96]u8),
+    primary_metric_len: usize = 0,
+    secondary_metric: [96]u8 = std.mem.zeroes([96]u8),
+    secondary_metric_len: usize = 0,
+
+    pub fn testKindSlice(self: *const BenchmarkHistoryRecord) []const u8 {
+        return self.test_kind[0..self.test_kind_len];
+    }
+    pub fn outcomeSlice(self: *const BenchmarkHistoryRecord) []const u8 {
+        return self.outcome[0..self.outcome_len];
+    }
+    pub fn primarySlice(self: *const BenchmarkHistoryRecord) []const u8 {
+        return self.primary_metric[0..self.primary_metric_len];
+    }
+    pub fn secondarySlice(self: *const BenchmarkHistoryRecord) []const u8 {
+        return self.secondary_metric[0..self.secondary_metric_len];
+    }
+};
+
 pub const OpenResult = struct {
     repo: Repository,
     recovered_from_corruption: bool = false,
@@ -186,6 +216,22 @@ pub const Repository = struct {
 
             try self.db.exec("COMMIT;");
         }
+
+        // V2.2 幂等补充基准测试历史表（完全兼容旧版 schema_version=1 数据库）
+        try self.db.exec(
+            \\CREATE TABLE IF NOT EXISTS benchmark_history (
+            \\  id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\  timestamp_utc_ms INTEGER NOT NULL,
+            \\  test_kind TEXT NOT NULL,
+            \\  outcome TEXT NOT NULL,
+            \\  duration_s REAL NOT NULL,
+            \\  error_count INTEGER NOT NULL DEFAULT 0,
+            \\  peak_temp_c REAL,
+            \\  primary_metric TEXT NOT NULL,
+            \\  secondary_metric TEXT NOT NULL DEFAULT ''
+            \\);
+            \\CREATE INDEX IF NOT EXISTS idx_bench_ts ON benchmark_history(timestamp_utc_ms DESC);
+        );
     }
 
     pub const Telemetry1mRow = struct {
@@ -324,6 +370,66 @@ pub const Repository = struct {
         }
         return count;
     }
+
+    pub fn insertBenchmarkHistory(
+        self: *Repository,
+        timestamp_utc_ms: i64,
+        test_kind: []const u8,
+        outcome: []const u8,
+        duration_s: f64,
+        error_count: u64,
+        peak_temp_c: ?f64,
+        primary_metric: []const u8,
+        secondary_metric: []const u8,
+    ) !void {
+        var st = try self.db.prepare(
+            \\INSERT INTO benchmark_history
+            \\  (timestamp_utc_ms, test_kind, outcome, duration_s, error_count, peak_temp_c, primary_metric, secondary_metric)
+            \\VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        );
+        defer st.finalize();
+        try st.bindInt64(1, timestamp_utc_ms);
+        try st.bindText(2, test_kind);
+        try st.bindText(3, outcome);
+        try st.bindDouble(4, duration_s);
+        try st.bindInt64(5, @intCast(@min(error_count, std.math.maxInt(i64))));
+        if (peak_temp_c) |pt| {
+            try st.bindDouble(6, pt);
+        } else {
+            _ = sqlite.c.sqlite3_bind_null(st.stmt, 6);
+        }
+        try st.bindText(7, primary_metric);
+        try st.bindText(8, secondary_metric);
+        _ = try st.step();
+    }
+
+    pub fn queryRecentBenchmarks(self: *Repository, out: []BenchmarkHistoryRecord) !usize {
+        var st = try self.db.prepare(
+            \\SELECT id, timestamp_utc_ms, test_kind, outcome, duration_s, error_count, peak_temp_c, primary_metric, secondary_metric
+            \\FROM benchmark_history
+            \\ORDER BY timestamp_utc_ms DESC, id DESC
+            \\LIMIT 16;
+        );
+        defer st.finalize();
+        var count: usize = 0;
+        while (count < out.len and try st.step()) {
+            const has_temp = sqlite.c.sqlite3_column_type(st.stmt, 6) != sqlite.c.SQLITE_NULL;
+            var rec = BenchmarkHistoryRecord{
+                .id = st.columnInt64(0),
+                .timestamp_utc_ms = st.columnInt64(1),
+                .duration_s = st.columnDouble(4),
+                .error_count = @intCast(@max(0, st.columnInt64(5))),
+                .peak_temp_c = if (has_temp) st.columnDouble(6) else null,
+            };
+            copyInto(&rec.test_kind, &rec.test_kind_len, st.columnText(2));
+            copyInto(&rec.outcome, &rec.outcome_len, st.columnText(3));
+            copyInto(&rec.primary_metric, &rec.primary_metric_len, st.columnText(7));
+            copyInto(&rec.secondary_metric, &rec.secondary_metric_len, st.columnText(8));
+            out[count] = rec;
+            count += 1;
+        }
+        return count;
+    }
 };
 
 fn copyInto(dest: []u8, out_len: *usize, src: []const u8) void {
@@ -387,4 +493,20 @@ test "Repository openWithRecovery recovers automatically from corrupted database
     var res = try Repository.openWithRecovery(std.testing.allocator, db_path);
     defer res.repo.close();
     try std.testing.expect(res.recovered_from_corruption);
+}
+
+test "Repository benchmark_history persists and retrieves comparison records" {
+    var repo = try Repository.openInMemory();
+    defer repo.close();
+
+    try repo.insertBenchmarkHistory(1_700_000_001_000, "cpu_stress", "passed", 15.2, 0, 68.5, "1T 42.1 / MT 340.5 MOPS (8.1x)", "Drop 1.2%");
+    try repo.insertBenchmarkHistory(1_700_000_002_000, "disk_bench", "passed", 8.4, 0, null, "SEQ W520/R780 MB/s", "RND4K R4100/W3200 IOPS");
+
+    var rows: [8]BenchmarkHistoryRecord = undefined;
+    const n = try repo.queryRecentBenchmarks(&rows);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings("disk_bench", rows[0].testKindSlice());
+    try std.testing.expect(rows[0].peak_temp_c == null);
+    try std.testing.expectEqualStrings("cpu_stress", rows[1].testKindSlice());
+    try std.testing.expectApproxEqAbs(@as(f64, 68.5), rows[1].peak_temp_c.?, 1e-6);
 }

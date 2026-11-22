@@ -77,6 +77,10 @@ pub const SharedTelemetry = struct {
 
     // V2: HWiNFO64 风格全传感器 Min / Avg / Max 统计表
     sensor_stats: sensor_stats.SensorStatsTable = .{},
+
+    // V2.2: 最近基准测试历史成绩（SQLite 持久化，用于优化前后对比）
+    bench_history: [16]repository.BenchmarkHistoryRecord = [_]repository.BenchmarkHistoryRecord{.{}} ** 16,
+    bench_history_count: usize = 0,
 };
 
 const BucketAccum = struct {
@@ -112,6 +116,7 @@ pub const MonitoringService = struct {
     mutex: std.Thread.Mutex = .{},
     shared: SharedTelemetry = .{},
     latest_seq_atomic: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    pending_bench_save: ?repository.BenchmarkHistoryRecord = null,
     alerts: alert_mod.AlertEngine = .{},
     pending_notification: ?alert_mod.AlertEvent = null,
     stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -220,6 +225,24 @@ pub const MonitoringService = struct {
 
     pub fn triggerDiskRescan(self: *MonitoringService) void {
         self.rescan_disks_flag.store(true, .release);
+    }
+
+    /// 异步登记一条已完成的基准测试成绩（立即更新内存列表，并由后台线程安全写入 SQLite）
+    pub fn recordBenchmarkHistory(self: *MonitoringService, rec: repository.BenchmarkHistoryRecord) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        // 插入到内存列表头部（最新在前）
+        var i: usize = @min(self.shared.bench_history_count, self.shared.bench_history.len - 1);
+        while (i > 0) : (i -= 1) {
+            self.shared.bench_history[i] = self.shared.bench_history[i - 1];
+        }
+        self.shared.bench_history[0] = rec;
+        if (self.shared.bench_history_count < self.shared.bench_history.len) {
+            self.shared.bench_history_count += 1;
+        }
+        self.pending_bench_save = rec;
+        self.shared.sample_seq += 1;
+        self.latest_seq_atomic.store(self.shared.sample_seq, .release);
     }
 
     /// 规范 §2.5.5：用户确认告警后以当前值为新基线
@@ -379,9 +402,15 @@ pub const MonitoringService = struct {
         if (self.db_path) |path| {
             if (repository.Repository.openWithRecovery(self.allocator, path)) |opened| {
                 repo_opt = opened.repo;
+                var loaded_hist: [16]repository.BenchmarkHistoryRecord = [_]repository.BenchmarkHistoryRecord{.{}} ** 16;
+                const hist_n = repo_opt.?.queryRecentBenchmarks(&loaded_hist) catch 0;
                 self.mutex.lock();
                 self.shared.db_active = true;
                 self.shared.db_recovered = opened.recovered_from_corruption;
+                self.shared.bench_history = loaded_hist;
+                self.shared.bench_history_count = hist_n;
+                self.shared.sample_seq += 1;
+                self.latest_seq_atomic.store(self.shared.sample_seq, .release);
                 self.mutex.unlock();
             } else |_| {}
         }
@@ -540,8 +569,25 @@ pub const MonitoringService = struct {
                 self.latest_seq_atomic.store(self.shared.sample_seq, .release);
                 self.mutex.unlock();
 
-                // 3. P6: 每 60 秒批量事务写入 1 分钟聚合数据至 SQLite
+                // 3. P6/V2.2: 落盘待保存的基准测试历史 + 每 60 秒批量事务写入 1 分钟聚合数据至 SQLite
                 if (repo_opt) |*r| {
+                    var save_rec: ?repository.BenchmarkHistoryRecord = null;
+                    self.mutex.lock();
+                    save_rec = self.pending_bench_save;
+                    self.pending_bench_save = null;
+                    self.mutex.unlock();
+                    if (save_rec) |rec| {
+                        r.insertBenchmarkHistory(
+                            rec.timestamp_utc_ms,
+                            rec.testKindSlice(),
+                            rec.outcomeSlice(),
+                            rec.duration_s,
+                            rec.error_count,
+                            rec.peak_temp_c,
+                            rec.primarySlice(),
+                            rec.secondarySlice(),
+                        ) catch {};
+                    }
                     if (now_utc_ms - last_flush_ms >= 60_000) {
                         const bucket = @divTrunc(now_utc_ms, 60_000) * 60_000;
                         var batch: [4]repository.Repository.Telemetry1mRow = undefined;

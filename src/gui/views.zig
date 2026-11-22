@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zgui = @import("zgui");
 const state_mod = @import("../app/state.zig");
 const AppState = state_mod.AppState;
@@ -9,6 +10,7 @@ const SharedTelemetry = monitoring.SharedTelemetry;
 const benchmarks = @import("../core/benchmarks.zig");
 const BenchmarkSnapshot = benchmarks.BenchmarkSnapshot;
 const i18n = @import("../core/i18n.zig");
+const autostart = @import("../platform/autostart.zig");
 
 /// 规范 §7 + V2.0 全页面三语视图（简体中文 / English / 日本語）：
 /// - 全部卡片依据窗口剩余高度动态延展，消除底部大面积空白；
@@ -1322,24 +1324,69 @@ fn renderSensorsView(state: *AppState, tel: *const SharedTelemetry) void {
     widgets.endCard();
 }
 
+fn setFixedDir(dest: *[260]u8, src: []const u8) void {
+    const n = @min(dest.len - 1, src.len);
+    @memcpy(dest[0..n], src[0..n]);
+    dest[n] = 0;
+}
+
 fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *const BenchmarkSnapshot) void {
     const s = state.dpi_scale;
     const p = theme.active();
     const avail = zgui.getContentRegionAvail();
     const gap = 12.0 * s;
-    const left_w = @max(340.0 * s, (avail[0] - gap) * 0.48);
+    const left_w = @max(360.0 * s, (avail[0] - gap) * 0.46);
     const right_w = avail[0] - left_w - gap;
-    const full_h = @max(460.0 * s, avail[1]);
+    const full_h = @max(480.0 * s, avail[1]);
 
     if (widgets.beginCard(
         "##bench_ctrl_card",
-        i18n.tr("硬件稳定性与基准测试控制台 (V2.0)", "Hardware Stress & Benchmark Console (V2.0)", "ハードウェア安定性・ベンチマーク (V2.0)"),
-        i18n.tr("所有主动负载均内置高温自动熔断保护；磁盘测速采用无缓存受控临时文件，绝不写裸盘", "Built-in thermal auto-cutoff; disk benchmark uses unbuffered temp file (never raw disk)", "高温自動保護内蔵・ディスク計測はキャッシュ無効の一時ファイルのみ使用"),
+        i18n.tr("硬件稳定性与基准测试控制台 (V2.2)", "Hardware Stress & Benchmark Console (V2.2)", "ハードウェア安定性・ベンチマーク (V2.2)"),
+        i18n.tr("默认低优先级温和防卡顿模式 + 实时高温熔断；磁盘测速仅用受控临时文件并自动删除", "Low-priority Gentle Mode + live thermal cutoff; disk test uses auto-deleted temp file", "低優先度システム保護＋高温自動停止・ディスク計測は一時ファイル自動削除"),
         left_w,
         full_h,
         s,
         null,
     )) {
+        // 1. 测试前环境智能提醒（电池供电 / 缺少 CPU 温度传感器 / 防卡顿保护）
+        widgets.drawStatusPill(
+            if (state.bench_gentle_mode)
+                i18n.tr("防卡顿保护已开启（低优先级 + 保留系统核）", "Gentle Mode ON (Low-Priority + OS Headroom)", "システム保護オン（低優先度・OSコア確保）")
+            else
+                i18n.tr("全速压测模式（系统响应可能变慢）", "Full Speed Mode (UI may feel heavy)", "全速モード（応答が重くなる場合あり）"),
+            if (state.bench_gentle_mode) p.status_ok else p.status_caution,
+            s,
+        );
+
+        if (tel.has_system_sample and tel.system.battery.has_battery and !tel.system.battery.ac_online) {
+            zgui.dummy(.{ .w = 0, .h = 3.0 * s });
+            zgui.pushStyleColor4f(.{ .idx = .text, .c = p.status_caution });
+            zgui.textWrapped("! {s}", .{i18n.tr(
+                "检测到当前处于电池供电：CPU/GPU 性能可能受省电策略限制，建议插电后测试。",
+                "Running on battery power: CPU/GPU clocks may be throttled; plug in AC for accurate scores.",
+                "バッテリー駆動中です：省電力制限によりスコアが低下する可能性があります。AC 接続を推奨します。",
+            )});
+            zgui.popStyleColor(.{ .count = 1 });
+        }
+
+        if (builtin.os.tag == .windows and !(tel.extension.connected and tel.extension.cpu_package_temp_c != null)) {
+            zgui.dummy(.{ .w = 0, .h = 3.0 * s });
+            zgui.pushStyleColor4f(.{ .idx = .text, .c = p.status_caution });
+            zgui.textWrapped("! {s}", .{i18n.tr(
+                "提示：CPU 温度当前为 N/A，高温熔断仅能依赖 GPU 温度；建议先在「系统设置」启动 LHM 辅助进程。",
+                "Note: CPU temp is N/A; thermal cutoff uses GPU temp only. Launch LHM helper in Settings for CPU temp guard.",
+                "注意：CPU 温度が N/A のため高温保護は GPU 温度のみ参照します。設定から LHM ヘルパー起動を推奨します。",
+            )});
+            zgui.popStyleColor(.{ .count = 1 });
+        }
+
+        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+        _ = zgui.checkbox(i18n.tr(
+            "温和防卡顿模式（推荐：低优先级调度，不影响日常软件和系统流畅度）",
+            "Gentle System-Safe Mode (Recommended: low priority, keeps OS responsive)",
+            "システム保護モード（推奨：低優先度実行で普段の作業を妨げない）",
+        ), .{ .v = &state.bench_gentle_mode });
+
         const max_threads: i32 = @intCast(@max(tel.system.logical_cores, 1));
         _ = zgui.sliderInt(i18n.tr("CPU 测试线程数", "CPU Threads", "CPU スレッド数"), .{ .v = &state.bench_cpu_threads, .min = 1, .max = max_threads });
         _ = zgui.sliderInt(i18n.tr("烤机持续时长 (秒)", "Duration (sec)", "実行時間 (秒)"), .{ .v = &state.bench_duration_s, .min = 10, .max = 300 });
@@ -1347,49 +1394,108 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
         _ = zgui.sliderInt(i18n.tr("内存校验容量 (MB)", "Memory Size (MB)", "メモリ検証容量 (MB)"), .{ .v = &state.bench_mem_mb, .min = 64, .max = 1024 });
         _ = zgui.sliderInt(i18n.tr("磁盘临时文件大小 (MB)", "Disk Temp File (MB)", "ディスク一時ファイル (MB)"), .{ .v = &state.bench_disk_mb, .min = 64, .max = 1024 });
 
-        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+        // GPU 着色器强度选择（默认均衡，绝不触发 TDR 或桌面卡死）
+        zgui.textColored(p.text_secondary, "{s}:", .{i18n.tr("GPU 着色器负载档位", "GPU Shader Load", "GPU シェーダー負荷")});
+        zgui.sameLine(.{});
+        if (zgui.radioButton(i18n.tr("温和", "Gentle", "軽負荷"), .{ .active = state.bench_gpu_intensity == 0 })) state.bench_gpu_intensity = 0;
+        zgui.sameLine(.{});
+        if (zgui.radioButton(i18n.tr("均衡 (推荐)", "Balanced", "標準 (推奨)"), .{ .active = state.bench_gpu_intensity == 1 })) state.bench_gpu_intensity = 1;
+        zgui.sameLine(.{});
+        if (zgui.radioButton(i18n.tr("高负载", "Heavy", "高負荷"), .{ .active = state.bench_gpu_intensity == 2 })) state.bench_gpu_intensity = 2;
+
+        // 自定义磁盘测速目标目录 + 快捷盘符按钮 + 剩余空间/TBW 透明提示
+        zgui.dummy(.{ .w = 0, .h = 4.0 * s });
+        zgui.textColored(p.text_secondary, "{s}:", .{i18n.tr("磁盘测试目标目录", "Disk Target Directory", "ディスク計測先フォルダ")});
+        const dir_buf_z: [:0]u8 = state.bench_disk_dir[0 .. state.bench_disk_dir.len - 1 :0];
+        _ = zgui.inputText("##bench_disk_dir", .{ .buf = dir_buf_z });
+
+        if (builtin.os.tag == .windows) {
+            if (zgui.button("C:\\", .{})) setFixedDir(&state.bench_disk_dir, "C:\\Users\\Public");
+            zgui.sameLine(.{});
+            if (zgui.button("D:\\", .{})) setFixedDir(&state.bench_disk_dir, "D:\\");
+            zgui.sameLine(.{});
+            if (zgui.button("E:\\", .{})) setFixedDir(&state.bench_disk_dir, "E:\\");
+            zgui.sameLine(.{});
+            if (zgui.button("F:\\", .{})) setFixedDir(&state.bench_disk_dir, "F:\\");
+        } else {
+            if (zgui.button("/tmp", .{})) setFixedDir(&state.bench_disk_dir, "/tmp");
+            zgui.sameLine(.{});
+            if (zgui.button("/var/tmp", .{})) setFixedDir(&state.bench_disk_dir, "/var/tmp");
+        }
+
+        const est_tbw: f64 = (@as(f64, @floatFromInt(state.bench_disk_mb)) + 2.0) / (1024.0 * 1024.0);
+        if (state.bench_disk_free_bytes) |fb| {
+            const free_gb = @as(f64, @floatFromInt(fb)) / (1024.0 * 1024.0 * 1024.0);
+            const needed_b: u64 = @as(u64, @intCast(@max(state.bench_disk_mb, 32))) * 2 * 1024 * 1024 + 512 * 1024 * 1024;
+            zgui.textColored(if (fb >= needed_b) p.text_muted else p.status_critical, "{s}: {d:.1} GB  •  {s} {d} MB (~{d:.5} TBW)", .{
+                i18n.tr("目标盘可用空间", "Free Space", "空き容量"),
+                free_gb,
+                i18n.tr("预计写入", "Est. Write", "予想書込"),
+                state.bench_disk_mb,
+                est_tbw,
+            });
+        } else {
+            zgui.textColored(p.text_muted, "{s} {d} MB (~{d:.5} TBW)", .{
+                i18n.tr("预计写入量", "Est. Write", "予想書込量"),
+                state.bench_disk_mb,
+                est_tbw,
+            });
+        }
+
+        zgui.dummy(.{ .w = 0, .h = 4.0 * s });
         _ = zgui.checkbox(i18n.tr(
-            "二次确认：允许在 logs 目录创建临时文件进行磁盘测速（结束后自动删除）",
-            "Confirm: allow creating a temporary benchmark file in logs/ (auto-deleted)",
-            "二次確認：logs フォルダに一時ファイルを作成してディスク計測（終了後自動削除）",
+            "二次确认：允许在目标目录创建受控临时文件测速（结束后自动删除）",
+            "Confirm: allow creating a temp file in target directory (auto-deleted)",
+            "二次確認：指定フォルダに一時ファイルを作成して計測（終了後自動削除）",
         ), .{ .v = &state.bench_disk_confirmed });
 
-        zgui.dummy(.{ .w = 0, .h = 8.0 * s });
+        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         const running = (bench.outcome == .running);
 
         zgui.beginDisabled(.{ .disabled = running });
         zgui.pushStyleColor4f(.{ .idx = .button, .c = p.accent_blue_soft });
         zgui.pushStyleColor4f(.{ .idx = .button_hovered, .c = p.accent_blue_hover });
         zgui.pushStyleColor4f(.{ .idx = .text, .c = p.accent_blue });
-        if (zgui.button(i18n.tr("1. 启动 CPU 算力与稳定性校验", "1. Start CPU Compute & Stability Test", "1. CPU 演算・安定性テスト開始"), .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("1. CPU 单核/多核与散热降频测试", "1. CPU Single/Multi & Throttle Test", "1. CPU シングル/マルチ・サーマル検証"), .{ .w = -1.0, .h = 29.0 * s })) {
             state.request_start_cpu_bench = true;
         }
-        if (zgui.button(i18n.tr("2. 启动 4 轮内存位翻转与带宽校验 (MemTest)", "2. Start 4-Pass Memory Verify (MemTest)", "2. 4パス メモリビット・帯域検証開始"), .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("2. 内存延迟 (L1-RAM) + 多核拷贝 + 位翻转校验", "2. RAM Latency (L1-RAM) + Copy + Bit-Flip", "2. メモリ遅延 + コピー帯域 + 4パス検証"), .{ .w = -1.0, .h = 29.0 * s })) {
             state.request_start_mem_bench = true;
         }
-        if (zgui.button(i18n.tr("3. 启动磁盘 SEQ1M / RND4K 无缓存测速", "3. Start Disk SEQ1M / RND4K Unbuffered Bench", "3. ディスク SEQ1M / RND4K 無キャッシュ計測"), .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("3. 磁盘无缓存 SEQ1M/4K 读写 + 完整性校验", "3. Disk Unbuffered SEQ1M/4K R/W + Integrity", "3. ディスク無キャッシュ計測 + 整合性検証"), .{ .w = -1.0, .h = 29.0 * s })) {
             state.request_start_disk_bench = true;
         }
-        if (zgui.button(i18n.tr("4. 启动 GPU OpenGL 3.3 渲染烤机", "4. Start GPU OpenGL 3.3 Stress Test", "4. GPU OpenGL 3.3 負荷テスト開始"), .{ .w = -1.0, .h = 32.0 * s })) {
+        if (zgui.button(i18n.tr("4. GPU OpenGL 3.3 离屏着色器烤机", "4. GPU OpenGL 3.3 Offscreen Shader Stress", "4. GPU OpenGL 3.3 シェーダー負荷テスト"), .{ .w = -1.0, .h = 29.0 * s })) {
             state.request_start_gpu_bench = true;
+        }
+        if (zgui.button(i18n.tr("5. 整机安全联烤 (CPU + 内存 + GPU)", "5. Combined Safe Stress (CPU + RAM + GPU)", "5. 総合安全負荷テスト (CPU + RAM + GPU)"), .{ .w = -1.0, .h = 29.0 * s })) {
+            state.request_start_combined_bench = true;
+        }
+        zgui.popStyleColor(.{ .count = 3 });
+
+        zgui.pushStyleColor4f(.{ .idx = .button, .c = .{ p.status_ok[0], p.status_ok[1], p.status_ok[2], 0.18 } });
+        zgui.pushStyleColor4f(.{ .idx = .button_hovered, .c = .{ p.status_ok[0], p.status_ok[1], p.status_ok[2], 0.30 } });
+        zgui.pushStyleColor4f(.{ .idx = .text, .c = p.status_ok });
+        if (zgui.button(i18n.tr("6. 一键全套硬件综合体检（自动生成报告）", "6. 1-Click Full Hardware Diagnostic Suite", "6. ワンクリック総合ハードウェア診断"), .{ .w = -1.0, .h = 31.0 * s })) {
+            state.request_start_full_suite = true;
         }
         zgui.popStyleColor(.{ .count = 3 });
         zgui.endDisabled();
 
-        zgui.dummy(.{ .w = 0, .h = 8.0 * s });
+        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         zgui.pushStyleColor4f(.{ .idx = .button, .c = .{ p.status_critical[0], p.status_critical[1], p.status_critical[2], 0.22 } });
         zgui.pushStyleColor4f(.{ .idx = .text, .c = p.status_critical });
-        if (zgui.button(i18n.tr("立即停止当前测试", "Stop Active Test", "テストを今すぐ停止"), .{ .w = 165.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("立即停止测试", "Stop Test", "今すぐ停止"), .{ .w = 155.0 * s, .h = 28.0 * s })) {
             state.request_stop_bench = true;
         }
         zgui.popStyleColor(.{ .count = 2 });
         zgui.sameLine(.{});
-        if (zgui.button(i18n.tr("导出硬件测试报告", "Export Test Report", "レポートを出力"), .{ .w = 165.0 * s, .h = 30.0 * s })) {
+        if (zgui.button(i18n.tr("导出综合测试报告", "Export Report", "レポート出力"), .{ .w = 165.0 * s, .h = 28.0 * s })) {
             state.request_export_bench_report = true;
         }
 
         if (state.bench_msg.len > 0) {
-            zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+            zgui.dummy(.{ .w = 0, .h = 4.0 * s });
             zgui.textWrapped("{s}", .{state.bench_msg});
         }
     }
@@ -1399,8 +1505,8 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
 
     if (widgets.beginCard(
         "##bench_result_card",
-        i18n.tr("实时执行进度与实测结果", "Live Progress & Measured Results", "実行状況・実測結果"),
-        i18n.tr("联动监控实时温度与计算校验错误数", "Linked to live thermal sensors & hardware error counter", "リアルタイム温度監視・演算エラーカウンタ連動"),
+        i18n.tr("实时曲线、实测指标、诊断结论与历史对比", "Live Telemetry, Metrics, Diagnostics & History", "リアルタイム推移・実測値・診断結果・履歴比較"),
+        i18n.tr("自动归档每次测试成绩至本地 SQLite，方便清灰/调 XMP/换盘前后对比", "Results auto-saved to local SQLite for before/after tuning comparison", "結果をローカル SQLite に自動保存（清掃・XMP・換装前後の比較に対応）"),
         right_w,
         full_h,
         s,
@@ -1416,113 +1522,230 @@ fn renderStressTestView(state: *AppState, tel: *const SharedTelemetry, bench: *c
         zgui.sameLine(.{ .spacing = 10.0 * s });
         zgui.textColored(p.text_secondary, "{s}: {s}", .{ i18n.tr("项目", "Test", "項目"), bench.last_kind.labelZh() });
 
-        zgui.dummy(.{ .w = 0, .h = 8.0 * s });
+        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         var prog_buf: [32]u8 = undefined;
         const prog_txt = std.fmt.bufPrintZ(&prog_buf, "{d:.0}% ({d:.1}s)", .{ bench.progress_pct, bench.elapsed_s }) catch "";
-        zgui.progressBar(.{ .fraction = bench.progress_pct / 100.0, .w = -1.0, .h = 22.0 * s, .overlay = prog_txt });
+        zgui.progressBar(.{ .fraction = bench.progress_pct / 100.0, .w = -1.0, .h = 20.0 * s, .overlay = prog_txt });
 
-        zgui.dummy(.{ .w = 0, .h = 8.0 * s });
-        var err_buf: [80]u8 = undefined;
+        zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+        var err_buf: [96]u8 = undefined;
         const err_str = std.fmt.bufPrint(&err_buf, "{d} ({s})", .{
             bench.error_count,
-            i18n.trSlice("0 = 硬件计算/位校验正常", "0 = hardware/bit verify OK", "0 = 演算/ビット検証正常"),
+            i18n.trSlice("0 = 计算/内存/磁盘校验正常", "0 = compute/RAM/disk OK", "0 = 演算/メモリ/ディスク正常"),
         }) catch "0";
-        widgets.drawKeyValueLine(i18n.tr("硬件错误计数", "Hardware Errors", "エラー数"), err_str);
+        widgets.drawKeyValueLine(i18n.tr("错误计数", "Errors", "エラー数"), err_str);
 
-        var peak_buf: [96]u8 = undefined;
-        const peak_str = if (bench.peak_temp_c) |pt|
-            std.fmt.bufPrint(&peak_buf, "{d:.1}{s}  •  {s} {d:.0}{s}", .{
+        var peak_buf: [128]u8 = undefined;
+        const peak_str = if (bench.peak_temp_c) |pt| blk: {
+            const dt = if (bench.start_temp_c) |st_t| @max(0.0, pt - st_t) else 0.0;
+            if (bench.peak_gpu_power_w) |pw| {
+                break :blk std.fmt.bufPrint(&peak_buf, "{d:.1}{s} (+{d:.1}°)  •  GPU {d:.1} W  •  {s} {d:.0}{s}", .{
+                    state.temp_unit.convert(pt),
+                    state.temp_unit.symbol(),
+                    dt,
+                    pw,
+                    i18n.trSlice("熔断", "Cutoff", "保護"),
+                    state.temp_unit.convert(bench.thermal_cutoff_c),
+                    state.temp_unit.symbol(),
+                }) catch "N/A";
+            }
+            break :blk std.fmt.bufPrint(&peak_buf, "{d:.1}{s} (+{d:.1}°)  •  {s} {d:.0}{s}", .{
                 state.temp_unit.convert(pt),
                 state.temp_unit.symbol(),
-                i18n.trSlice("熔断上限", "Cutoff", "保護閾値"),
+                dt,
+                i18n.trSlice("熔断", "Cutoff", "保護"),
                 state.temp_unit.convert(bench.thermal_cutoff_c),
                 state.temp_unit.symbol(),
-            }) catch "N/A"
-        else
-            i18n.trSlice("N/A（建议启用 LHM 扩展或参考 GPU 温度）", "N/A (enable LHM extension or check GPU temp)", "N/A（LHM 拡張有効化または GPU 温度を参照）");
-        widgets.drawKeyValueLine(i18n.tr("期间峰值温度", "Peak Temp", "期間最高温度"), peak_str);
+            }) catch "N/A";
+        } else i18n.trSlice("N/A（建议启用 LHM 扩展或参考 GPU 温度）", "N/A (enable LHM extension or check GPU temp)", "N/A（LHM 拡張有効化または GPU 温度を参照）");
+        widgets.drawKeyValueLine(i18n.tr("峰值温度与温升", "Peak Temp & Delta", "最高温度・昇温幅"), peak_str);
+
+        // 智能三语诊断结论与排障建议框
+        zgui.dummy(.{ .w = 0, .h = 4.0 * s });
+        const advice_col = switch (bench.outcome) {
+            .failed_errors, .stopped_by_thermal, .failed_io => p.status_critical,
+            .passed => if (bench.cpu_throttle_drop_pct >= 15.0 or bench.disk_rnd4k_p99_lat_us > 15000.0) p.status_caution else p.status_ok,
+            else => p.accent_blue,
+        };
+        zgui.pushStyleColor4f(.{ .idx = .text, .c = advice_col });
+        zgui.textWrapped("{s}: {s}", .{
+            i18n.tr("智能诊断", "Diagnosis", "診断アドバイス"),
+            bench.diagnosticAdvice(),
+        });
+        zgui.popStyleColor(.{ .count = 1 });
+
+        // 实时 GPU OpenGL 3.3 FBO 着色器预览画面
+        if (bench.gpu_shader_active and state.bench_gpu_tex_id != 0) {
+            zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+            const cw = @min(zgui.getContentRegionAvail()[0], 420.0 * s);
+            const ch = cw * 9.0 / 16.0;
+            const tex_ref = zgui.TextureRef{
+                .tex_data = null,
+                .tex_id = @enumFromInt(@as(u64, state.bench_gpu_tex_id)),
+            };
+            zgui.image(tex_ref, .{ .w = cw, .h = ch, .uv0 = .{ 0, 1 }, .uv1 = .{ 1, 0 } });
+        }
+
+        // 测试过程实时曲线（性能 + 温度双线 ImPlot）
+        if (bench.trace_len >= 2) {
+            zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+            zgui.plot.pushStyleColor4f(.{ .idx = .frame_bg, .c = .{ 0, 0, 0, 0 } });
+            zgui.plot.pushStyleColor4f(.{ .idx = .plot_bg, .c = p.canvas_bg });
+            zgui.plot.pushStyleColor4f(.{ .idx = .plot_border, .c = p.divider });
+            defer zgui.plot.popStyleColor(.{ .count = 3 });
+            if (zgui.plot.beginPlot("##bench_live_trace", .{
+                .w = -1.0,
+                .h = 135.0 * s,
+                .flags = .{ .no_title = true, .no_mouse_text = true },
+            })) {
+                zgui.plot.setupAxis(.x1, .{ .label = "s" });
+                zgui.plot.setupAxis(.y1, .{ .flags = .{ .auto_fit = true } });
+                zgui.plot.setupAxis(.y2, .{ .label = "°C", .flags = .{ .opposite = true, .auto_fit = true } });
+                zgui.plot.setAxis(.y1);
+                zgui.plot.pushStyleColor4f(.{ .idx = .line, .c = p.accent_blue });
+                zgui.plot.plotLine("Perf", f64, .{
+                    .xv = bench.trace_times[0..bench.trace_len],
+                    .yv = bench.trace_perf[0..bench.trace_len],
+                });
+                zgui.plot.popStyleColor(.{ .count = 1 });
+                if (bench.peak_temp_c != null) {
+                    zgui.plot.setAxis(.y2);
+                    zgui.plot.pushStyleColor4f(.{ .idx = .line, .c = p.status_warning });
+                    zgui.plot.plotLine("Temp °C", f64, .{
+                        .xv = bench.trace_times[0..bench.trace_len],
+                        .yv = bench.trace_temp[0..bench.trace_len],
+                    });
+                    zgui.plot.popStyleColor(.{ .count = 1 });
+                }
+                zgui.plot.endPlot();
+            }
+        }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
         zgui.separator();
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
 
-        switch (bench.last_kind) {
-            .cpu_stress => {
-                var b1: [128]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "{d} {s}  •  {d:.2} MOPS", .{
-                    bench.cpu_threads,
-                    i18n.trSlice("线程", "Threads", "スレッド"),
-                    bench.cpu_score_mops,
-                }) catch "";
-                widgets.drawKeyValueLine(i18n.tr("CPU 实测成绩", "CPU Score", "CPU 実測スコア"), s1);
-            },
-            .memory_verify => {
-                var b1: [144]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "{d} MB  •  {d}/4  •  W {d:.2} GB/s  •  R+Verify {d:.2} GB/s", .{
-                    bench.mem_tested_mb, bench.mem_passes_done, bench.mem_write_gbs, bench.mem_read_gbs,
-                }) catch "";
-                widgets.drawKeyValueLine(i18n.tr("内存实测成绩", "Memory Result", "メモリ実測結果"), s1);
-            },
-            .disk_bench => {
-                var b1: [128]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "SEQ1M W {d:.1} MB/s  •  SEQ1M R {d:.1} MB/s", .{ bench.disk_seq_write_mbs, bench.disk_seq_read_mbs }) catch "";
-                widgets.drawKeyValueLine(i18n.tr("顺序吞吐", "Sequential", "シーケンシャル"), s1);
-                var b2: [128]u8 = undefined;
-                const s2 = std.fmt.bufPrint(&b2, "RND4K R {d:.1} MB/s  •  {d:.0} IOPS  •  {d:.1} us", .{
-                    bench.disk_rnd4k_read_mbs, bench.disk_rnd4k_read_iops, bench.disk_rnd4k_avg_lat_us,
-                }) catch "";
-                widgets.drawKeyValueLine(i18n.tr("4K 随机读", "4K Random Read", "4K ランダム読込"), s2);
-            },
-            .gpu_stress => {
-                var b1: [96]u8 = undefined;
-                const s1 = std.fmt.bufPrint(&b1, "{d} frames  •  {d:.1} FPS", .{ bench.gpu_frames, bench.gpu_avg_fps }) catch "";
-                widgets.drawKeyValueLine(i18n.tr("GPU 渲染统计", "GPU Render Stats", "GPU 描画統計"), s1);
-            },
-            .none => {
-                zgui.textColored(p.text_muted, "{s}", .{i18n.tr(
-                    "请在左侧选择测试项开始准确的硬件稳定性与性能验证。",
-                    "Select a test on the left to start hardware stability & benchmark verification.",
-                    "左側からテスト項目を選択して安定性・性能検証を開始してください。",
-                )});
-            },
+        // 完整分项实测明细
+        if (bench.has_cpu_result) {
+            var b1: [160]u8 = undefined;
+            const s1 = std.fmt.bufPrint(&b1, "{s} {d:.2}  •  {s}({d}T) {d:.2} MOPS  •  {s} {d:.2}x  •  {s} {d:.1}%", .{
+                i18n.trSlice("单核", "1T", "1T"),
+                bench.cpu_single_mops,
+                i18n.trSlice("多核", "MT", "MT"),
+                bench.cpu_threads,
+                bench.cpu_score_mops,
+                i18n.trSlice("扩展", "Scale", "倍率"),
+                bench.cpu_scaling_ratio,
+                i18n.trSlice("后段衰减", "Drop", "低下"),
+                bench.cpu_throttle_drop_pct,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("CPU 实测成绩", "CPU Score", "CPU 実測"), s1);
+        }
+        if (bench.has_mem_result) {
+            var b1: [160]u8 = undefined;
+            const s1 = std.fmt.bufPrint(&b1, "{d} MB ({d}/4)  •  W {d:.2}  •  R {d:.2}  •  MT-Copy {d:.2} GB/s", .{
+                bench.mem_tested_mb, bench.mem_passes_done, bench.mem_write_gbs, bench.mem_read_gbs, bench.mem_copy_gbs,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("内存带宽", "RAM Bandwidth", "メモリ帯域"), s1);
+            var b2: [160]u8 = undefined;
+            const s2 = std.fmt.bufPrint(&b2, "L1 {d:.2} ns  •  L2 {d:.2} ns  •  L3 {d:.2} ns  •  RAM {d:.2} ns", .{
+                bench.mem_lat_l1_ns, bench.mem_lat_l2_ns, bench.mem_lat_l3_ns, bench.mem_lat_ram_ns,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("缓存与内存延迟", "Cache & RAM Latency", "キャッシュ/メモリ遅延"), s2);
+        }
+        if (bench.has_disk_result) {
+            var b1: [160]u8 = undefined;
+            const s1 = std.fmt.bufPrint(&b1, "SEQ1M W {d:.1} / R {d:.1} MB/s  •  {s}: {s}", .{
+                bench.disk_seq_write_mbs,
+                bench.disk_seq_read_mbs,
+                i18n.trSlice("完整性", "Integrity", "整合性"),
+                if (!bench.disk_integrity_checked)
+                    "..."
+                else if (bench.disk_integrity_errors == 0)
+                    i18n.trSlice("100% 一致", "100% OK", "100% 一致")
+                else
+                    i18n.trSlice("异常不匹配!", "MISMATCH!", "不一致検出!"),
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("磁盘顺序与校验", "Disk SEQ & Verify", "シーケンシャル・検証"), s1);
+
+            var b2: [180]u8 = undefined;
+            const s2 = std.fmt.bufPrint(&b2, "R {d:.1} MB/s ({d:.0} IOPS)  •  W {d:.1} MB/s ({d:.0} IOPS)", .{
+                bench.disk_rnd4k_read_mbs, bench.disk_rnd4k_read_iops, bench.disk_rnd4k_write_mbs, bench.disk_rnd4k_write_iops,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("4K 随机读写", "4K Random R/W", "4K ランダム R/W"), s2);
+
+            var b3: [180]u8 = undefined;
+            const s3 = std.fmt.bufPrint(&b3, "Read Min/Avg/P95/P99/Max: {d:.0}/{d:.0}/{d:.0}/{d:.0}/{d:.0} us  •  Write P99: {d:.0} us", .{
+                bench.disk_rnd4k_min_lat_us,
+                bench.disk_rnd4k_avg_lat_us,
+                bench.disk_rnd4k_p95_lat_us,
+                bench.disk_rnd4k_p99_lat_us,
+                bench.disk_rnd4k_max_lat_us,
+                bench.disk_rnd4k_write_p99_us,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("4K 分位数延迟", "4K Tail Latency", "4K 遅延分布"), s3);
+        }
+        if (bench.has_gpu_result) {
+            var b1: [160]u8 = undefined;
+            const s1 = std.fmt.bufPrint(&b1, "Avg {d:.1} FPS  •  1% Low {d:.1} FPS  •  FT {d:.2} ms (Max {d:.2} ms)  •  {d} frames", .{
+                bench.gpu_avg_fps, bench.gpu_low1_fps, bench.gpu_avg_frametime_ms, bench.gpu_max_frametime_ms, bench.gpu_frames,
+            }) catch "";
+            widgets.drawKeyValueLine(i18n.tr("GPU 着色器成绩", "GPU Shader Result", "GPU シェーダー結果"), s1);
+        }
+        if (!bench.has_cpu_result and !bench.has_mem_result and !bench.has_disk_result and !bench.has_gpu_result) {
+            zgui.textColored(p.text_muted, "{s}", .{i18n.tr(
+                "请在左侧选择任意测试项或点击「6. 一键全套硬件综合体检」开始验证。",
+                "Select any test on the left or click '6. 1-Click Full Diagnostic Suite' to begin.",
+                "左側からテスト項目を選ぶか「6. ワンクリック総合診断」を押してください。",
+            )});
         }
 
         if (bench.summary_len > 0) {
-            zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-            widgets.drawKeyValueLine(i18n.tr("运行说明", "Status Note", "実行メモ"), bench.summarySlice());
+            zgui.dummy(.{ .w = 0, .h = 4.0 * s });
+            widgets.drawKeyValueLine(i18n.tr("运行状态", "Status", "実行状態"), bench.summarySlice());
         }
 
-        if (bench.active_kind == .gpu_stress and bench.outcome == .running) {
-            zgui.dummy(.{ .w = 0, .h = 10.0 * s });
-            const dl = zgui.getWindowDrawList();
-            const pos = zgui.getCursorScreenPos();
-            const cw = zgui.getContentRegionAvail()[0];
-            const ch = @max(140.0 * s, zgui.getContentRegionAvail()[1] - 8.0 * s);
-            dl.addRectFilled(.{ .pmin = pos, .pmax = .{ pos[0] + cw, pos[1] + ch }, .col = theme.colorU32(p.canvas_bg), .rounding = 8.0 });
-            const cx = pos[0] + cw * 0.5;
-            const cy = pos[1] + ch * 0.5;
-            const max_r = @min(cw, ch) * 0.44;
-            const phase: f32 = @floatCast(@mod(bench.elapsed_s * 2.4, std.math.pi * 2.0));
-            var k: usize = 0;
-            while (k < 180) : (k += 1) {
-                const fk: f32 = @floatFromInt(k);
-                const r = max_r * (0.15 + 0.85 * (fk / 180.0));
-                const a0 = phase + fk * 0.17;
-                const x1 = cx + @cos(a0) * r;
-                const y1 = cy + @sin(a0) * r;
-                const x2 = cx + @cos(a0 + 2.094) * r;
-                const y2 = cy + @sin(a0 + 2.094) * r;
-                const x3 = cx + @cos(a0 + 4.188) * r;
-                const y3 = cy + @sin(a0 + 4.188) * r;
-                const col = [4]f32{
-                    0.2 + 0.7 * (@sin(fk * 0.05 + phase) * 0.5 + 0.5),
-                    0.5 + 0.4 * (@cos(fk * 0.04 + phase) * 0.5 + 0.5),
-                    0.95,
-                    0.35,
-                };
-                dl.addTriangle(.{ .p1 = .{ x1, y1 }, .p2 = .{ x2, y2 }, .p3 = .{ x3, y3 }, .col = theme.colorU32(col), .thickness = 1.5 });
+        // 本地 SQLite 历史测试成绩对比表
+        if (tel.bench_history_count > 0) {
+            zgui.dummy(.{ .w = 0, .h = 8.0 * s });
+            zgui.separator();
+            zgui.dummy(.{ .w = 0, .h = 4.0 * s });
+            zgui.textColored(p.text_secondary, "{s} ({d})", .{
+                i18n.tr("历史测试记录对比（本地 SQLite）", "Recent Benchmark History (SQLite)", "過去のテスト履歴比較 (SQLite)"),
+                tel.bench_history_count,
+            });
+            if (zgui.beginTable("##bench_hist_tbl", .{
+                .column = 5,
+                .flags = .{ .borders = .{ .inner_h = true }, .row_bg = true, .sizing = .stretch_prop, .scroll_y = true },
+                .outer_size = .{ 0.0, 130.0 * s },
+            })) {
+                zgui.tableSetupColumn(i18n.tr("测试项", "Test", "項目"), .{ .init_width_or_height = 0.85 });
+                zgui.tableSetupColumn(i18n.tr("结果", "Result", "結果"), .{ .init_width_or_height = 0.65 });
+                zgui.tableSetupColumn(i18n.tr("主成绩", "Primary", "主スコア"), .{ .init_width_or_height = 1.6 });
+                zgui.tableSetupColumn(i18n.tr("细项", "Details", "詳細"), .{ .init_width_or_height = 1.3 });
+                zgui.tableSetupColumn(i18n.tr("峰值温度", "Peak", "最高温度"), .{ .init_width_or_height = 0.6 });
+                zgui.tableHeadersRow();
+
+                for (tel.bench_history[0..tel.bench_history_count]) |*hr| {
+                    zgui.tableNextRow(.{});
+                    _ = zgui.tableNextColumn();
+                    zgui.text("{s}", .{hr.testKindSlice()});
+                    _ = zgui.tableNextColumn();
+                    const ok = std.mem.eql(u8, hr.outcomeSlice(), "passed");
+                    zgui.textColored(if (ok) p.status_ok else p.status_caution, "{s}", .{hr.outcomeSlice()});
+                    _ = zgui.tableNextColumn();
+                    zgui.text("{s}", .{hr.primarySlice()});
+                    _ = zgui.tableNextColumn();
+                    zgui.textColored(p.text_muted, "{s}", .{hr.secondarySlice()});
+                    _ = zgui.tableNextColumn();
+                    if (hr.peak_temp_c) |pt| {
+                        zgui.text("{d:.0}{s}", .{ state.temp_unit.convert(pt), state.temp_unit.symbol() });
+                    } else {
+                        zgui.textColored(p.text_muted, "N/A", .{});
+                    }
+                }
+                zgui.endTable();
             }
-            zgui.dummy(.{ .w = cw, .h = ch });
         }
     }
     widgets.endCard();
@@ -1754,7 +1977,24 @@ fn renderSettingsView(state: *AppState, tel: *const SharedTelemetry) void {
         }
 
         zgui.dummy(.{ .w = 0, .h = 6.0 * s });
-        _ = zgui.checkbox(i18n.tr("开机自动启动（当前用户 HKCU\\Run）", "Start with Windows (HKCU\\Run)", "Windows 起動時に自動開始 (HKCU\\Run)"), .{ .v = &state.start_with_windows });
+        if (zgui.checkbox(i18n.tr("开机自动启动（勾选即立即生效，静默托盘启动）", "Start with Windows (Instant, starts in tray)", "Windows 起動時に自動開始（即時反映・トレイ常駐）"), .{ .v = &state.start_with_windows })) {
+            state.request_save_config = true;
+        }
+        const auto_st = autostart.queryAutoStartStatus();
+        zgui.sameLine(.{ .spacing = 8.0 * s });
+        widgets.drawStatusPill(
+            switch (auto_st) {
+                .enabled => i18n.tr("系统自启已生效", "Active in OS", "登録済"),
+                .disabled => i18n.tr("未注册", "Off", "未登録"),
+                .blocked_by_os => i18n.tr("被任务管理器禁用", "Disabled in TaskMgr", "タスクマネージャ無効"),
+            },
+            switch (auto_st) {
+                .enabled => p.status_ok,
+                .disabled => p.status_unknown,
+                .blocked_by_os => p.status_caution,
+            },
+            s,
+        );
         _ = zgui.checkbox(i18n.tr("暂停后台采集", "Pause Background Monitoring", "バックグラウンド監視を一時停止"), .{ .v = &state.monitoring_paused });
         _ = zgui.checkbox(i18n.tr("允许唤醒休眠中的机械硬盘（默认关闭）", "Allow Waking Standby HDDs (Default Off)", "スリープ中の HDD 起動を許可（初期オフ）"), .{ .v = &state.allow_wake_standby_disk });
         _ = zgui.checkbox(i18n.tr("启用可选 LHM 扩展组件通信（默认关闭）", "Enable Optional LHM Extension (Default Off)", "任意 LHM 拡張通信を有効化（初期オフ）"), .{ .v = &state.extension_enabled });
