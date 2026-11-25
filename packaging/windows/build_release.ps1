@@ -29,15 +29,16 @@ $stagePrefix = Join-Path $distDir "stage"
 $stageBin = Join-Path $stagePrefix "bin"
 New-Item -ItemType Directory -Force -Path $stageBin | Out-Null
 
-Write-Host "=== [1/6] Zig 单元测试、Debug 校验与 ReleaseSafe x64 构建 ==="
+Write-Host "=== [1/6] Zig 单元测试、Debug 校验与 ReleaseSafe x64 通用指令集 (-Dcpu=baseline) 构建 ==="
 if (-not $SkipTests) {
     & $ZigExe build test
     if ($LASTEXITCODE -ne 0) { throw "zig build test 失败" }
 }
 & $ZigExe build --prefix (Join-Path $distDir "stage-debug")
 if ($LASTEXITCODE -ne 0) { throw "zig build (Debug) 失败" }
-& $ZigExe build -Doptimize=ReleaseSafe --prefix $stagePrefix
-if ($LASTEXITCODE -ne 0) { throw "zig build -Doptimize=ReleaseSafe 失败" }
+# 强制使用 -Dcpu=baseline（标准 x86-64 SSE2），避免发布包混入编译机 AVX2/AlderLake 指令导致旧款 Win10 CPU 闪退
+& $ZigExe build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix $stagePrefix
+if ($LASTEXITCODE -ne 0) { throw "zig build -Doptimize=ReleaseSafe -Dcpu=baseline 失败" }
 
 Write-Host "=== [2/6] 发布可选 MPL-2.0 LibreHardwareMonitor 辅助进程 ==="
 dotnet publish "helpers\lhm_bridge\WinHardwareMonitor.LhmHelper.csproj" -c Release -r win-x64 -o $stageBin

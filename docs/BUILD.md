@@ -56,8 +56,8 @@ zig build test
 # 2. Debug 构建（输出至 zig-out\bin\winhardware-monitor.exe）
 zig build
 
-# 3. ReleaseSafe 发布构建（推荐用于发布和实机测试）
-zig build -Doptimize=ReleaseSafe
+# 3. ReleaseSafe 通用发布构建（强制 -Dcpu=baseline 兼容所有 64 位 Win10/Win11 处理器，避免旧 CPU 非法指令闪退）
+zig build -Doptimize=ReleaseSafe -Dcpu=baseline
 
 # 4. 运行 11 页面 × 3 语言 × 黑白双主题无人工冒烟测试
 .\zig-out\bin\winhardware-monitor.exe --smoke-test
@@ -75,9 +75,9 @@ zig build verify-p0
 
 ### Linux Bash
 ```bash
-# 运行全部单元测试与 ReleaseSafe 构建
+# 运行全部单元测试与 ReleaseSafe 通用发布构建（-Dcpu=baseline）
 zig build test
-zig build -Doptimize=ReleaseSafe
+zig build -Doptimize=ReleaseSafe -Dcpu=baseline
 
 # 无界面 CLI 硬件信息采集与 V2.2 基准测试（支持 --lang zh|en|ja）
 ./zig-out/bin/winhardware-monitor --cli --lang zh

@@ -11,10 +11,11 @@ DIST_DIR="${REPO_ROOT}/dist-linux"
 
 cd "${REPO_ROOT}"
 
-echo "=== [1/6] 运行 Zig 单元测试、Debug 与 ReleaseSafe 构建 ==="
+echo "=== [1/6] 运行 Zig 单元测试、Debug 与 ReleaseSafe (-Dcpu=baseline) 构建 ==="
 "${ZIG_BIN}" build test
 "${ZIG_BIN}" build
-"${ZIG_BIN}" build -Doptimize=ReleaseSafe
+# 强制使用 -Dcpu=baseline（标准 x86-64 SSE2），确保通用兼容任意 x86_64 Linux 处理器
+"${ZIG_BIN}" build -Doptimize=ReleaseSafe -Dcpu=baseline
 
 BIN_PATH="${REPO_ROOT}/zig-out/bin/winhardware-monitor"
 chmod +x "${BIN_PATH}"

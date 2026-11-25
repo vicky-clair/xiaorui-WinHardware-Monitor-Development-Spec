@@ -3,10 +3,12 @@
 //! - 默认启动桌面 GUI（带单实例保障、深/浅双主题与渲染节能）；
 //! - 传入 `--cli` / `--info` / `--bench <cpu|mem|disk|all>` 时直接进入无界面硬件监测与基准测试模式（无需 X11/OpenGL）。
 const std = @import("std");
+const builtin = @import("builtin");
 const SingleInstance = @import("platform/single_instance.zig").SingleInstance;
 const window = @import("gui/window.zig");
 const cli = @import("cli.zig");
 const i18n = @import("core/i18n.zig");
+const win32 = @import("providers/windows/win32.zig");
 
 pub fn main() !void {
     // 通用内存分配器：退出时由 defer 自动检查资源释放
@@ -88,9 +90,25 @@ pub fn main() !void {
         std.Thread.sleep(2000 * std.time.ns_per_ms);
     }
 
-    try window.runMainWindow(allocator, .{
+    window.runMainWindow(allocator, .{
         .smoke_test = smoke_test,
         .start_minimized = is_autostart,
         .single_instance = if (smoke_test) null else &single,
-    });
+    }) catch |err| {
+        // Windows GUI 子系统无控制台，除 OpenGLContextFailed（内部已弹窗）外统一弹出友好错误提示，避免静默闪退
+        if (builtin.os.tag == .windows and !smoke_test and err != error.OpenGLContextFailed) {
+            var msg_buf: [512]u8 = undefined;
+            const msg_utf8 = std.fmt.bufPrint(
+                &msg_buf,
+                "WinHardware Monitor 启动失败：{s}\n\n常见排查建议：\n1. 请确认系统为 64 位 Windows 10 / 11；\n2. 请确认已安装支持 OpenGL 3.3 的显卡驱动（避免 Microsoft 基本显示适配器）；\n3. 可在命令行运行 winhardware-monitor.exe --cli 查看详细诊断输出。",
+                .{@errorName(err)},
+            ) catch "WinHardware Monitor 启动失败。";
+            if (std.unicode.utf8ToUtf16LeAllocZ(allocator, msg_utf8)) |msg_w| {
+                defer allocator.free(msg_w);
+                const cap_w = std.unicode.utf8ToUtf16LeStringLiteral("WinHardware Monitor - 启动失败");
+                _ = win32.MessageBoxW(null, msg_w.ptr, cap_w, 0x10);
+            } else |_| {}
+        }
+        return err;
+    };
 }
