@@ -1110,8 +1110,11 @@ fn renderDisksView(state: *AppState, tel: *const SharedTelemetry) void {
         } else {
             const st = if (d.support == .nvme_native) ds.nvme.status else ds.ata.status;
             const err = if (d.support == .nvme_native) ds.nvme.error_code else ds.ata.error_code;
-            widgets.drawStatusPill(st.labelZh(), p.sensorStatusColor(st), s);
-            zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+            // 若上面已显示相同的「未知」健康状态徽章，则不再重复画第二个「未知」胶囊
+            if (!d.support.isUnsupported()) {
+                widgets.drawStatusPill(st.labelZh(), p.sensorStatusColor(st), s);
+                zgui.dummy(.{ .w = 0, .h = 6.0 * s });
+            }
             if (d.support.isUnsupported()) {
                 zgui.textWrapped("{s}: {s}", .{
                     i18n.tr("该设备不支持标准直读 SMART，健康状态标注为“未知”", "Direct SMART read unsupported; health is marked Unknown", "標準 SMART 直読非対応のため健康状態は「不明」と表示します"),

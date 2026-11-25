@@ -55,8 +55,12 @@ Source: "..\..\docs\PERMISSIONS.md"; DestDir: "{app}\docs"; Components: core; Fl
 Source: "..\..\docs\HARDWARE_SUPPORT.md"; DestDir: "{app}\docs"; Components: core; Flags: ignoreversion
 Source: "..\..\docs\RELEASE_NOTES_v0.1.0.md"; DestDir: "{app}\docs"; Components: core; Flags: ignoreversion
 
-; 可选 MPL-2.0 独立辅助进程（默认不勾选，与 Apache-2.0 主程序严格进程隔离）
+; 可选 MPL-2.0 独立辅助进程（默认不勾选，与 Apache-2.0 主程序严格进程隔离；基于 Win10/11 内置 .NET Framework 4.8 免装运行库）
 Source: "{#BinDir}\WinHardwareMonitor.LhmHelper.exe"; DestDir: "{app}"; Components: lhm_helper; Flags: ignoreversion
+Source: "{#BinDir}\WinHardwareMonitor.LhmHelper.exe.config"; DestDir: "{app}"; Components: lhm_helper; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#BinDir}\LibreHardwareMonitorLib.dll"; DestDir: "{app}"; Components: lhm_helper; Flags: ignoreversion
+Source: "{#BinDir}\HidSharp.dll"; DestDir: "{app}"; Components: lhm_helper; Flags: ignoreversion
+Source: "{#BinDir}\System.CodeDom.dll"; DestDir: "{app}"; Components: lhm_helper; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\..\helpers\lhm_bridge\LICENSE-MPL-2.0.txt"; DestDir: "{app}\helpers\lhm_bridge"; Components: lhm_helper; Flags: ignoreversion
 Source: "..\..\helpers\lhm_bridge\README.md"; DestDir: "{app}\helpers\lhm_bridge"; Components: lhm_helper; Flags: ignoreversion
 

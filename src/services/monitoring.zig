@@ -378,6 +378,14 @@ pub const MonitoringService = struct {
     }
 
     fn workerMain(self: *MonitoringService) void {
+        // 降低后台监控线程调度优先级，确保 24 小时常驻采集与 SQLite 刷盘绝不抢占用户前台软件/游戏 CPU
+        if (@import("builtin").os.tag == .windows) {
+            const win32 = @import("../providers/windows/win32.zig");
+            _ = win32.SetThreadPriority(win32.GetCurrentThread(), -1); // THREAD_PRIORITY_BELOW_NORMAL
+        } else if (@import("builtin").os.tag == .linux) {
+            _ = std.os.linux.syscall3(.setpriority, 0, 0, 5); // PRIO_PROCESS=0, self=0, nice +5
+        }
+
         var provider = system_info.SystemInfoProvider.init(self.allocator);
         defer provider.deinit();
 

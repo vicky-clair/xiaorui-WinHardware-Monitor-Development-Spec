@@ -77,7 +77,7 @@
 ### 5. 如何启用可选扩展组件（读取 Windows CPU 温度与主板风扇/电压）
 
 Windows 原生用户态 API 不公开 CPU 封装温度、CPU 功耗与主板 Super I/O 芯片传感器；主程序坚持零内核驱动，若需要查看这些指标：
-1. 确保 `WinHardwareMonitor.LhmHelper.exe` 位于主程序同目录（需本机安装 .NET 8/9/10 Desktop/Runtime）；
+1. 确保 `WinHardwareMonitor.LhmHelper.exe` 及其随附 DLL（`LibreHardwareMonitorLib.dll`、`HidSharp.dll` 等）位于主程序同目录（安装时选“完整安装”或勾选可选扩展组件；**基于 Windows 10/11 原生内置的 .NET Framework 4.8，无需用户额外安装 .NET 8 运行库**）；
 2. 在主程序 **「主板与传感器」** 或 **「系统设置」** 页面点击 **「启动 LHM 辅助进程 (需管理员)」**；
 3. 该辅助进程为**无界面只读后台服务**，通过同用户本地命名管道 `\\.\pipe\WinHardwareMonitor_LhmBridge_v1` 向普通或管理员权限主程序提供数据，**零网络、不碰磁盘**；
 4. 若在开启“内核隔离 / 内存完整性”的 Windows 11 上仍读取受限，请按 LibreHardwareMonitor 官方指引自行安装受信任的 [PawnIO](https://pawnio.eu) 驱动（本软件**绝不静默安装第三方驱动**）。

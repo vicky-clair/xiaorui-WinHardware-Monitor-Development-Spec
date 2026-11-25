@@ -95,8 +95,10 @@ pub fn drawStatusPill(label: [:0]const u8, color: [4]f32, dpi_scale: f32) void {
     const total_w = pad_x * 2.0 + dot_r * 2.0 + dot_gap + text_sz[0];
     const total_h = text_sz[1] + pad_y * 2.0;
 
-    const bg_col = [4]f32{ color[0], color[1], color[2], 0.14 };
-    const border_col = [4]f32{ color[0], color[1], color[2], 0.38 };
+    // 浅色背景下提高边框与文字对比度，确保老旧低对比度笔记本屏幕也清晰易读
+    const is_light = theme.active().canvas_bg[0] > 0.5;
+    const bg_col = [4]f32{ color[0], color[1], color[2], if (is_light) 0.12 else 0.16 };
+    const border_col = [4]f32{ color[0], color[1], color[2], if (is_light) 0.55 else 0.42 };
     dl.addRectFilled(.{
         .pmin = pos,
         .pmax = .{ pos[0] + total_w, pos[1] + total_h },

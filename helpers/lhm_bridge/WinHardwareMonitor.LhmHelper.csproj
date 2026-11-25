@@ -2,24 +2,22 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <RollForward>Major</RollForward>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- 目标 .NET Framework 4.8：Windows 10 (1903+) 与 Windows 11 系统原生内置，无需用户额外下载安装 .NET 8 Runtime -->
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
     <AssemblyName>WinHardwareMonitor.LhmHelper</AssemblyName>
     <ApplicationIcon>..\..\assets\app_icon.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <Product>WinHardware Monitor LHM Extension Helper</Product>
     <Description>Isolated read-only LibreHardwareMonitor IPC helper (MPL-2.0) for WinHardware Monitor</Description>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Pinned MPL-2.0 dependency: LibreHardwareMonitorLib -->
+    <!-- Pinned MPL-2.0 dependency: LibreHardwareMonitorLib 0.9.4 (natively supports net472/net48) -->
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
   </ItemGroup>
 

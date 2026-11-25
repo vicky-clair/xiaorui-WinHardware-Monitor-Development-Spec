@@ -103,11 +103,11 @@ pub const LIGHT_COLORS = ThemeColors{
     .accent_cyan = hex(0x0891B2, 1.0),
     .accent_purple = hex(0x7C3AED, 1.0),
 
-    .status_ok = hex(0x059669, 1.0),
-    .status_caution = hex(0xD97706, 1.0),
-    .status_warning = hex(0xEA580C, 1.0),
-    .status_critical = hex(0xDC2626, 1.0),
-    .status_unknown = hex(0x64748B, 1.0),
+    .status_ok = hex(0x047857, 1.0),
+    .status_caution = hex(0xB45309, 1.0),
+    .status_warning = hex(0xC2410C, 1.0),
+    .status_critical = hex(0xB91C1C, 1.0),
+    .status_unknown = hex(0x334155, 1.0),
 
     .gauge_track = hex(0xE2E8F0, 1.0),
     .btn_hover = hex(0xDFE6F0, 1.0),

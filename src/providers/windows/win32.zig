@@ -664,6 +664,24 @@ pub fn D3DKMTCloseAdapter(pData: *const D3DKMT_CLOSEADAPTER) NTSTATUS {
     return f(pData);
 }
 
+pub const DISPLAY_DEVICEW = extern struct {
+    cb: DWORD = @sizeOf(DISPLAY_DEVICEW),
+    DeviceName: [32]u16 = std.mem.zeroes([32]u16),
+    DeviceString: [128]u16 = std.mem.zeroes([128]u16),
+    StateFlags: DWORD = 0,
+    DeviceID: [128]u16 = std.mem.zeroes([128]u16),
+    DeviceKey: [128]u16 = std.mem.zeroes([128]u16),
+};
+pub const DISPLAY_DEVICE_ACTIVE: DWORD = 0x00000001;
+pub const DISPLAY_DEVICE_MIRRORING_DRIVER: DWORD = 0x00000008;
+
+pub extern "user32" fn EnumDisplayDevicesW(
+    lpDevice: ?LPCWSTR,
+    iDevNum: DWORD,
+    lpDisplayDevice: *DISPLAY_DEVICEW,
+    dwFlags: DWORD,
+) callconv(.winapi) BOOL;
+
 pub extern "user32" fn LoadImageW(hInst: ?HINSTANCE, name: LPCWSTR, img_type: UINT, cx: i32, cy: i32, fuLoad: UINT) callconv(.winapi) ?HICON;
 pub extern "user32" fn SendMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.winapi) LRESULT;
 pub extern "user32" fn GetSystemMetrics(nIndex: i32) callconv(.winapi) i32;
