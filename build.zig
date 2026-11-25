@@ -61,8 +61,10 @@ pub fn build(b: *std.Build) void {
         .name = "winhardware-monitor",
         .root_module = exe_mod,
     });
-    // 使用 Windows GUI 子系统，双击启动时不弹出多余的黑色终端窗口
+    // 使用 Windows GUI 子系统，双击启动时不弹出多余的黑色终端窗口；
+    // 嵌入多分辨率应用图标（assets/app_icon.ico）、版本信息与 Win10/11 DPI 兼容清单（assets/app.manifest）
     if (target.result.os.tag == .windows) {
+        exe_mod.addWin32ResourceFile(.{ .file = b.path("assets/winhardware-monitor.rc") });
         exe.subsystem = .Windows;
     }
     b.installArtifact(exe);

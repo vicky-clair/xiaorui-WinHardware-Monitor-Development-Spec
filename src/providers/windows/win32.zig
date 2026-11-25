@@ -468,7 +468,16 @@ pub const TPM_RIGHTBUTTON: UINT = 0x0002;
 pub const TPM_RETURNCMD: UINT = 0x0100;
 pub const TPM_NONOTIFY: UINT = 0x0080;
 
+pub const DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1: DWORD = 19;
 pub const DWMWA_USE_IMMERSIVE_DARK_MODE: DWORD = 20;
+pub const WM_SETICON: UINT = 0x0080;
+pub const ICON_SMALL: WPARAM = 0;
+pub const ICON_BIG: WPARAM = 1;
+pub const IMAGE_ICON: UINT = 1;
+pub const LR_DEFAULTSIZE: UINT = 0x0040;
+pub const LR_SHARED: UINT = 0x8000;
+/// 嵌入在主程序 PE 资源表中的自定义应用图标资源 ID（对应 assets/winhardware-monitor.rc 中的 `100 ICON`，偶数值满足 u16 指针 2 字节对齐）
+pub const IDI_APP_ICON: LPCWSTR = @ptrFromInt(100);
 
 pub const POINT = extern struct {
     x: LONG = 0,
@@ -623,9 +632,60 @@ pub extern "advapi32" fn GetTokenInformation(
     ReturnLength: *DWORD,
 ) callconv(.winapi) BOOL;
 
-pub extern "gdi32" fn D3DKMTEnumAdapters2(pData: *D3DKMT_ENUMADAPTERS2) callconv(.winapi) NTSTATUS;
-pub extern "gdi32" fn D3DKMTQueryAdapterInfo(pData: *D3DKMT_QUERYADAPTERINFO) callconv(.winapi) NTSTATUS;
-pub extern "gdi32" fn D3DKMTCloseAdapter(pData: *const D3DKMT_CLOSEADAPTER) callconv(.winapi) NTSTATUS;
+/// 运行时动态加载 gdi32.dll 中的 D3DKMT 接口，避免老旧 Windows 10/Server/无 WDDM 2.0 环境下因静态导入导致无法启动
+const D3dkmtEnumFn = *const fn (*D3DKMT_ENUMADAPTERS2) callconv(.winapi) NTSTATUS;
+const D3dkmtQueryFn = *const fn (*D3DKMT_QUERYADAPTERINFO) callconv(.winapi) NTSTATUS;
+const D3dkmtCloseFn = *const fn (*const D3DKMT_CLOSEADAPTER) callconv(.winapi) NTSTATUS;
+
+pub fn D3DKMTEnumAdapters2(pData: *D3DKMT_ENUMADAPTERS2) NTSTATUS {
+    if (builtin.os.tag != .windows) return -1;
+    const gdi_w = std.unicode.utf8ToUtf16LeStringLiteral("gdi32.dll");
+    const hm = GetModuleHandleW(gdi_w) orelse LoadLibraryW(gdi_w) orelse return -1;
+    const proc = GetProcAddress(hm, "D3DKMTEnumAdapters2") orelse return -1;
+    const f: D3dkmtEnumFn = @ptrCast(@alignCast(proc));
+    return f(pData);
+}
+
+pub fn D3DKMTQueryAdapterInfo(pData: *D3DKMT_QUERYADAPTERINFO) NTSTATUS {
+    if (builtin.os.tag != .windows) return -1;
+    const gdi_w = std.unicode.utf8ToUtf16LeStringLiteral("gdi32.dll");
+    const hm = GetModuleHandleW(gdi_w) orelse LoadLibraryW(gdi_w) orelse return -1;
+    const proc = GetProcAddress(hm, "D3DKMTQueryAdapterInfo") orelse return -1;
+    const f: D3dkmtQueryFn = @ptrCast(@alignCast(proc));
+    return f(pData);
+}
+
+pub fn D3DKMTCloseAdapter(pData: *const D3DKMT_CLOSEADAPTER) NTSTATUS {
+    if (builtin.os.tag != .windows) return -1;
+    const gdi_w = std.unicode.utf8ToUtf16LeStringLiteral("gdi32.dll");
+    const hm = GetModuleHandleW(gdi_w) orelse LoadLibraryW(gdi_w) orelse return -1;
+    const proc = GetProcAddress(hm, "D3DKMTCloseAdapter") orelse return -1;
+    const f: D3dkmtCloseFn = @ptrCast(@alignCast(proc));
+    return f(pData);
+}
+
+pub extern "user32" fn LoadImageW(hInst: ?HINSTANCE, name: LPCWSTR, img_type: UINT, cx: i32, cy: i32, fuLoad: UINT) callconv(.winapi) ?HICON;
+pub extern "user32" fn SendMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.winapi) LRESULT;
+pub extern "user32" fn GetSystemMetrics(nIndex: i32) callconv(.winapi) i32;
+pub const SM_CXICON: i32 = 11;
+pub const SM_CYICON: i32 = 12;
+pub const SM_CXSMICON: i32 = 49;
+pub const SM_CYSMICON: i32 = 50;
+
+/// 加载内嵌于 EXE 的多分辨率自定义应用图标；若在单元测试等无资源上下文中则安全回退到系统默认图标
+pub fn loadAppIcon(small: bool) ?HICON {
+    if (builtin.os.tag != .windows) return null;
+    const hinst: ?HINSTANCE = @ptrCast(GetModuleHandleW(null));
+    const cx = GetSystemMetrics(if (small) SM_CXSMICON else SM_CXICON);
+    const cy = GetSystemMetrics(if (small) SM_CYSMICON else SM_CYICON);
+    if (LoadImageW(hinst, IDI_APP_ICON, IMAGE_ICON, cx, cy, LR_SHARED)) |icon| {
+        return icon;
+    }
+    if (LoadIconW(hinst, IDI_APP_ICON)) |icon| {
+        return icon;
+    }
+    return LoadIconW(null, IDI_APPLICATION);
+}
 
 pub extern "user32" fn RegisterClassExW(lpWndClass: *const WNDCLASSEXW) callconv(.winapi) ATOM;
 pub extern "user32" fn UnregisterClassW(lpClassName: LPCWSTR, hInstance: ?HINSTANCE) callconv(.winapi) BOOL;

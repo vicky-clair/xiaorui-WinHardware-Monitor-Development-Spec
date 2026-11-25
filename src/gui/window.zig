@@ -58,8 +58,67 @@ fn applyTitlebarTheme(native_hwnd: ?win32.HWND, mode: state_mod.ThemeMode) void 
     if (builtin.os.tag != .windows) return;
     if (native_hwnd) |hwnd| {
         const dark: win32.BOOL = if (mode == .dark) 1 else 0;
-        _ = win32.DwmSetWindowAttribute(hwnd, win32.DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, @sizeOf(win32.BOOL));
+        // Windows 10 20H1+ / Windows 11 使用属性 20；旧版 Windows 10 (1809/1903/1909) 自动回退属性 19
+        if (win32.DwmSetWindowAttribute(hwnd, win32.DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, @sizeOf(win32.BOOL)) != 0) {
+            _ = win32.DwmSetWindowAttribute(hwnd, win32.DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, &dark, @sizeOf(win32.BOOL));
+        }
     }
+}
+
+/// 为主窗口设置任务栏大图标与标题栏小图标（Windows 直接读取 PE 内嵌多分辨率 .ico）
+fn applyWindowIcon(native_hwnd: ?win32.HWND) void {
+    if (builtin.os.tag != .windows) return;
+    if (native_hwnd) |hwnd| {
+        if (win32.loadAppIcon(false)) |big_icon| {
+            _ = win32.SendMessageW(hwnd, win32.WM_SETICON, win32.ICON_BIG, @intCast(@intFromPtr(big_icon)));
+        }
+        if (win32.loadAppIcon(true)) |small_icon| {
+            _ = win32.SendMessageW(hwnd, win32.WM_SETICON, win32.ICON_SMALL, @intCast(@intFromPtr(small_icon)));
+        }
+    }
+}
+
+const GlWindowResult = struct {
+    window: *zglfw.Window,
+    gl_major: u32,
+    gl_minor: u32,
+    glsl_version: [:0]const u8,
+};
+
+/// 三级 OpenGL 渲染上下文降级创建：
+/// 1) 优先 OpenGL 3.3 Core (#version 330) — 支持完整图形与 GPU 着色器烤机；
+/// 2) 次选 OpenGL 3.0 兼容模式 (#version 130) — 兼容老旧 Windows 10 核显（如 Intel HD 2000/3000）与虚拟机；
+/// 3) 兜底 OpenGL 2.1 (#version 120) — 兼容极老旧显卡或软件 OpenGL 驱动。
+fn createCompatibleWindow() !GlWindowResult {
+    const Attempt = struct {
+        major: u32,
+        minor: u32,
+        core: bool,
+        glsl: [:0]const u8,
+    };
+    const attempts = [_]Attempt{
+        .{ .major = 3, .minor = 3, .core = true, .glsl = "#version 330" },
+        .{ .major = 3, .minor = 0, .core = false, .glsl = "#version 130" },
+        .{ .major = 2, .minor = 1, .core = false, .glsl = "#version 120" },
+    };
+
+    for (attempts) |att| {
+        zglfw.windowHint(.context_version_major, @intCast(att.major));
+        zglfw.windowHint(.context_version_minor, @intCast(att.minor));
+        zglfw.windowHint(.opengl_profile, if (att.core) .opengl_core_profile else .opengl_any_profile);
+        zglfw.windowHint(.visible, false);
+
+        if (zglfw.Window.create(1280, 780, "WinHardware Monitor", null, null)) |win| {
+            return .{
+                .window = win,
+                .gl_major = att.major,
+                .gl_minor = att.minor,
+                .glsl_version = att.glsl,
+            };
+        } else |_| {}
+    }
+
+    return error.OpenGLContextFailed;
 }
 
 pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
@@ -117,23 +176,18 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     };
     defer zglfw.terminate();
 
-    // 关键修复（解决管理员启动白屏/白闪）：
-    // 先创建隐藏窗口，完成 OpenGL 3.3、字体、主题与首帧完整 swapBuffers 后再显示窗口！
-    zglfw.windowHint(.context_version_major, 3);
-    zglfw.windowHint(.context_version_minor, 3);
-    zglfw.windowHint(.opengl_profile, .opengl_core_profile);
-    zglfw.windowHint(.visible, false);
-
-    const window = zglfw.Window.create(1280, 780, "WinHardware Monitor", null, null) catch {
+    // 关键修复（全硬件/老旧 Win10/虚拟机兼容 + 解决白屏）：
+    // 先创建隐藏窗口并自动按 OpenGL 3.3 Core → 3.0 → 2.1 三级降级，完成字体、主题与首帧渲染后再显示窗口！
+    const gl_win = createCompatibleWindow() catch {
         if (builtin.os.tag == .windows) {
             const msg = std.unicode.utf8ToUtf16LeStringLiteral(
-                "无法创建 OpenGL 3.3 Core 渲染上下文。\n请检查显卡驱动，或避免在不支持 OpenGL 3.3 的远程桌面/虚拟机环境中运行。",
+                "无法创建 OpenGL 渲染上下文（已自动尝试 3.3 / 3.0 / 2.1）。\n请安装对应显卡驱动（避免 Microsoft 基本显示适配器），或通过命令行运行 winhardware-monitor.exe --cli 查看硬件监控数据。",
             );
             const cap = std.unicode.utf8ToUtf16LeStringLiteral("WinHardware Monitor - 启动失败");
             _ = win32.MessageBoxW(null, msg, cap, 0x10);
         } else {
             std.debug.print(
-                "[WinHardware Monitor] 无法创建 OpenGL 3.3 Core 窗口上下文。\n" ++
+                "[WinHardware Monitor] 无法创建 OpenGL 窗口上下文（已自动尝试 3.3 / 3.0 / 2.1）。\n" ++
                     "若处于桌面环境，请确认 X11/XWayland（DISPLAY）与 libGL/Mesa 驱动正常；\n" ++
                     "若处于无桌面服务器/SSH 终端，请改用命令行模式：winhardware-monitor --cli 或 --bench all\n",
                 .{},
@@ -141,12 +195,14 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
         }
         return error.OpenGLContextFailed;
     };
+    const window = gl_win.window;
     defer window.destroy();
 
     window.setSizeLimits(920, 580, -1, -1);
 
     const native_hwnd: ?win32.HWND = if (builtin.os.tag == .windows) @ptrCast(zglfw.getWin32Window(window)) else null;
     applyTitlebarTheme(native_hwnd, config.theme_mode);
+    applyWindowIcon(native_hwnd);
 
     _ = window.setCursorPosCallback(onCursorPos);
     _ = window.setMouseButtonCallback(onMouseButton);
@@ -158,8 +214,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
 
     zglfw.makeContextCurrent(window);
     zglfw.swapInterval(1);
-    try zopengl.loadCoreProfile(zglfw.getProcAddress, 3, 3);
+    try zopengl.loadCoreProfile(zglfw.getProcAddress, gl_win.gl_major, gl_win.gl_minor);
     const gl = zopengl.bindings;
+    const gl_supports_33 = (gl_win.gl_major > 3) or (gl_win.gl_major == 3 and gl_win.gl_minor >= 3);
 
     const scale_xy = window.getContentScale();
     const dpi_scale = @max(scale_xy[0], 1.0);
@@ -172,7 +229,7 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     const font_res = fonts.loadFonts(dpi_scale);
     theme.applyTheme(config.theme_mode, dpi_scale);
 
-    zgui.backend.initWithGlSlVersion(window, "#version 330");
+    zgui.backend.initWithGlSlVersion(window, gl_win.glsl_version);
     defer zgui.backend.deinit();
 
     var state = AppState{
@@ -796,9 +853,9 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             monitor.recordBenchmarkHistory(rec);
         }
 
-        // OpenGL 3.3 离屏着色器按需驱动（仅 GPU 烤机/联烤/体检第4步激活，结束立即释放显存零负担）
+        // OpenGL 3.3 离屏着色器按需驱动（仅 GPU 烤机/联烤/体检第4步且上下文支持 OpenGL 3.3 时激活，结束立即释放显存零负担）
         if (bench_snap.gpu_shader_active and !opts.smoke_test) {
-            if (shader_stress.ensureReady(bench_snap.gpu_intensity)) {
+            if (gl_supports_33 and shader_stress.ensureReady(bench_snap.gpu_intensity)) {
                 shader_stress.renderFrame(bench_snap.elapsed_s);
                 state.bench_gpu_tex_id = shader_stress.textureId();
             } else {

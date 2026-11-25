@@ -43,6 +43,7 @@ touch "${PORTABLE_STAGE}/portable.flag"
 cp config/default.toml "${PORTABLE_STAGE}/config/"
 cp data/drive_attributes.toml "${PORTABLE_STAGE}/data/"
 cp packaging/linux/winhardware-monitor.desktop "${PORTABLE_STAGE}/"
+cp assets/app_icon_256.png "${PORTABLE_STAGE}/winhardware-monitor.png"
 cp LICENSE README.md CHANGELOG.md "${PORTABLE_STAGE}/"
 cp docs/*.md "${PORTABLE_STAGE}/docs/"
 tar -C "${DIST_DIR}" -czf "${DIST_DIR}/${PORTABLE_NAME}.tar.gz" "${PORTABLE_NAME}"
@@ -55,12 +56,16 @@ if command -v dpkg-deb >/dev/null 2>&1; then
   mkdir -p "${DEB_STAGE}/DEBIAN" \
            "${DEB_STAGE}/usr/bin" \
            "${DEB_STAGE}/usr/share/applications" \
+           "${DEB_STAGE}/usr/share/icons/hicolor/256x256/apps" \
+           "${DEB_STAGE}/usr/share/icons/hicolor/48x48/apps" \
            "${DEB_STAGE}/usr/share/winhardware-monitor/config" \
            "${DEB_STAGE}/usr/share/winhardware-monitor/data" \
            "${DEB_STAGE}/usr/share/doc/winhardware-monitor"
 
   install -m 755 "${BIN_PATH}" "${DEB_STAGE}/usr/bin/winhardware-monitor"
   install -m 644 packaging/linux/winhardware-monitor.desktop "${DEB_STAGE}/usr/share/applications/"
+  install -m 644 assets/app_icon_256.png "${DEB_STAGE}/usr/share/icons/hicolor/256x256/apps/winhardware-monitor.png"
+  install -m 644 assets/app_icon_48.png "${DEB_STAGE}/usr/share/icons/hicolor/48x48/apps/winhardware-monitor.png"
   install -m 644 config/default.toml "${DEB_STAGE}/usr/share/winhardware-monitor/config/"
   install -m 644 data/drive_attributes.toml "${DEB_STAGE}/usr/share/winhardware-monitor/data/"
   install -m 644 LICENSE README.md CHANGELOG.md "${DEB_STAGE}/usr/share/doc/winhardware-monitor/"

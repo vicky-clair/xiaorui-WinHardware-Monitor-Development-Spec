@@ -35,7 +35,7 @@ pub const TrayIcon = struct {
             .uID = self.uid,
             .uFlags = win32.NIF_ICON | win32.NIF_TIP | win32.NIF_MESSAGE,
             .uCallbackMessage = self.callback_msg,
-            .hIcon = win32.LoadIconW(null, win32.IDI_APPLICATION),
+            .hIcon = win32.loadAppIcon(true),
         };
         copyUtf8ToUtf16Buf(&nid.szTip, tooltip_utf8);
 

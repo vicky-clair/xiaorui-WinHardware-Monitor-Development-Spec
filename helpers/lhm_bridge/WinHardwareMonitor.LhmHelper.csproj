@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>WinHardwareMonitor.LhmHelper</AssemblyName>
+    <ApplicationIcon>..\..\assets\app_icon.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <Product>WinHardware Monitor LHM Extension Helper</Product>
     <Description>Isolated read-only LibreHardwareMonitor IPC helper (MPL-2.0) for WinHardware Monitor</Description>

@@ -22,6 +22,8 @@ and Headless CLI modes (--cli / --info / --bench).
 rm -rf %{buildroot}
 install -Dm755 %{_bin_path} %{buildroot}/usr/bin/winhardware-monitor
 install -Dm644 %{_src_root}/packaging/linux/winhardware-monitor.desktop %{buildroot}/usr/share/applications/winhardware-monitor.desktop
+install -Dm644 %{_src_root}/assets/app_icon_256.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/winhardware-monitor.png
+install -Dm644 %{_src_root}/assets/app_icon_48.png %{buildroot}/usr/share/icons/hicolor/48x48/apps/winhardware-monitor.png
 install -Dm644 %{_src_root}/config/default.toml %{buildroot}/usr/share/winhardware-monitor/config/default.toml
 install -Dm644 %{_src_root}/data/drive_attributes.toml %{buildroot}/usr/share/winhardware-monitor/data/drive_attributes.toml
 install -Dm644 %{_src_root}/LICENSE %{buildroot}/usr/share/doc/winhardware-monitor/LICENSE
@@ -34,6 +36,8 @@ install -Dm644 %{_src_root}/CHANGELOG.md %{buildroot}/usr/share/doc/winhardware-
 %doc /usr/share/doc/winhardware-monitor/CHANGELOG.md
 /usr/bin/winhardware-monitor
 /usr/share/applications/winhardware-monitor.desktop
+/usr/share/icons/hicolor/256x256/apps/winhardware-monitor.png
+/usr/share/icons/hicolor/48x48/apps/winhardware-monitor.png
 /usr/share/winhardware-monitor/config/default.toml
 /usr/share/winhardware-monitor/data/drive_attributes.toml
 

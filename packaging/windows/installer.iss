@@ -21,6 +21,8 @@ OutputBaseFilename=WinHardwareMonitor-0.1.0-win64-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 LicenseFile=..\..\LICENSE
+SetupIconFile=..\..\assets\app_icon.ico
+UninstallDisplayIcon={app}\winhardware-monitor.exe
 WizardStyle=modern
 DisableProgramGroupPage=yes
 
@@ -59,8 +61,8 @@ Source: "..\..\helpers\lhm_bridge\LICENSE-MPL-2.0.txt"; DestDir: "{app}\helpers\
 Source: "..\..\helpers\lhm_bridge\README.md"; DestDir: "{app}\helpers\lhm_bridge"; Components: lhm_helper; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\WinHardware Monitor"; Filename: "{app}\winhardware-monitor.exe"
-Name: "{autodesktop}\WinHardware Monitor"; Filename: "{app}\winhardware-monitor.exe"; Tasks: desktopicon
+Name: "{group}\WinHardware Monitor"; Filename: "{app}\winhardware-monitor.exe"; IconFilename: "{app}\winhardware-monitor.exe"
+Name: "{autodesktop}\WinHardware Monitor"; Filename: "{app}\winhardware-monitor.exe"; IconFilename: "{app}\winhardware-monitor.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: unchecked
