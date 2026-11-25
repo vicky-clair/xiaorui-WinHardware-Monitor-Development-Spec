@@ -1,6 +1,6 @@
 .{
     .name = .winhardware_monitor,
-    .version = "0.1.0-p0",
+    .version = "0.1.0",
     .fingerprint = 0x6492c0886f408a96,
     .minimum_zig_version = "0.15.2",
     .dependencies = .{

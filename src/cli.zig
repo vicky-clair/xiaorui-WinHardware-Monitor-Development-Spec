@@ -308,3 +308,19 @@ fn waitWithThermalGuard(runner: *benchmarks.BenchmarkRunner) void {
         std.Thread.sleep(200 * std.time.ns_per_ms);
     }
 }
+
+/// 计算 CLI 温和模式默认安全线程数（预留 1 个逻辑核心防系统卡顿）
+pub fn computeSafeDefaultThreads(logical_cores: u32, requested: u32) u32 {
+    if (requested > 0) return requested;
+    return if (logical_cores > 1) logical_cores - 1 else 1;
+}
+
+test "CliOptions defaults and computeSafeDefaultThreads reserve 1 core safely" {
+    const opts = CliOptions{};
+    try std.testing.expect(opts.gentle_mode);
+    try std.testing.expectEqual(@as(u32, 10), opts.duration_s);
+    try std.testing.expectEqual(@as(f64, 90.0), opts.cutoff_c);
+    try std.testing.expectEqual(@as(u32, 11), computeSafeDefaultThreads(12, 0));
+    try std.testing.expectEqual(@as(u32, 1), computeSafeDefaultThreads(1, 0));
+    try std.testing.expectEqual(@as(u32, 4), computeSafeDefaultThreads(12, 4));
+}

@@ -340,10 +340,9 @@ pub fn readLinuxNvmeSmart(drive_index: u32) nvme_smart.NvmeSmartData {
         .cdw10 = 0x01,
     };
     if (linux.E.init(linux.ioctl(fd, NVME_IOCTL_ADMIN_CMD, @intFromPtr(&id_cmd))) == .SUCCESS) {
-        const wctemp = std.mem.readInt(u16, id_buf[266..268], .little);
-        const cctemp = std.mem.readInt(u16, id_buf[268..270], .little);
-        if (wctemp >= 200 and wctemp <= 500) res.wctemp_c = @as(i32, wctemp) - 273;
-        if (cctemp >= 200 and cctemp <= 500) res.cctemp_c = @as(i32, cctemp) - 273;
+        const id_head: *const win32.NVME_IDENTIFY_CONTROLLER_HEAD = @ptrCast(@alignCast(&id_buf));
+        res.wctemp_c = id_head.wctempCelsius();
+        res.cctemp_c = id_head.cctempCelsius();
     }
 
     return res;

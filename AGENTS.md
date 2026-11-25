@@ -1,6 +1,6 @@
 # AGENTS.md — WinHardware Monitor 开发强制规则
 
-本文件面向所有 AI 编程代理（Codex、Claude Code、Antigravity 等）及协作者。所有开发必须严格遵守 [WinHardware-Monitor-Development-Spec.md](WinHardware-Monitor-Development-Spec.md)（当前版本 V1.1）。
+本文件面向所有 AI 编程代理（Codex、Claude Code、Antigravity 等）及协作者。所有开发必须严格遵守 [WinHardware-Monitor-Development-Spec.md](WinHardware-Monitor-Development-Spec.md)（当前版本 V2.2）。
 
 ## 1. 技术栈锁定（禁止擅自变更）
 

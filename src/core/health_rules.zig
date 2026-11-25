@@ -5,6 +5,9 @@ const nvme = @import("../collectors/storage/nvme_smart.zig");
 const ata = @import("../collectors/storage/ata_smart.zig");
 const i18n = @import("i18n.zig");
 
+/// 与 data/drive_attributes.toml 中 category = "ssd_life" 同步登记的 SSD 剩余寿命属性 ID 列表（单元测试强制一致性校验）
+pub const SSD_LIFE_ATTR_IDS = [_]u8{ 0xE7, 0xE9 };
+
 /// 规范 §2.5.5 磁盘健康判定引擎与基线机制。
 /// 严格遵守红线 #3/#4：
 /// - 仅允许触发规范 §2.5.5 登记的 21 条编号规则，不得新增未登记逻辑；
@@ -294,8 +297,14 @@ pub fn evaluateAta(data: *const ata.AtaSmartData, baseline: ?*const DiskBaseline
         };
     }
 
-    // SSD-LIFE (E7 SSD Life Left / E9 Media Wearout Indicator)
-    const life_attr = data.findAttr(0xE7) orelse data.findAttr(0xE9);
+    // SSD-LIFE（按 data/drive_attributes.toml 中 category = "ssd_life" 登记表驱动查找）
+    var life_attr: ?ata.AtaAttribute = null;
+    for (SSD_LIFE_ATTR_IDS) |life_id| {
+        if (data.findAttr(life_id)) |a| {
+            life_attr = a;
+            break;
+        }
+    }
     if (life_attr) |la| {
         if (la.current > 0 and la.current < cfg.ssd_life_left_warning) {
             out.addHit("SSD-LIFE", .warning, "{s} 0x{X:0>2}: {d}% < {d}%", .{
@@ -399,4 +408,24 @@ test "All 11 ATA/SATA SSD health rules (§2.5.5) trigger accurately with baselin
     try std.testing.expect(hasRule(&r, "ATA-BB"));
     try std.testing.expect(hasRule(&r, "ATA-C7-INC"));
     try std.testing.expect(hasRule(&r, "SSD-LIFE"));
+}
+
+test "SSD-LIFE attribute IDs stay synchronized with data/drive_attributes.toml" {
+    const toml = @import("../utils/toml.zig");
+    const file = std.fs.cwd().openFile("data/drive_attributes.toml", .{}) catch return;
+    defer file.close();
+    const content = try file.readToEndAlloc(std.testing.allocator, 64 * 1024);
+    defer std.testing.allocator.free(content);
+
+    var doc = try toml.Document.parse(std.testing.allocator, content);
+    defer doc.deinit();
+
+    // 校验每个登记在 SSD_LIFE_ATTR_IDS 中的属性在 data/drive_attributes.toml 均标记为 category = "ssd_life"
+    for (SSD_LIFE_ATTR_IDS) |attr_id| {
+        var sec_buf: [16]u8 = undefined;
+        const sec = try std.fmt.bufPrint(&sec_buf, "attr_{X:0>2}", .{attr_id});
+        try std.testing.expectEqual(@as(?i64, attr_id), doc.getInt(sec, "id"));
+        const cat = doc.getString(sec, "category");
+        try std.testing.expect(cat != null and std.mem.eql(u8, cat.?, "ssd_life"));
+    }
 }

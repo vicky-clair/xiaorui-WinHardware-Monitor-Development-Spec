@@ -289,6 +289,32 @@ pub const NVME_HEALTH_INFO_LOG = extern struct {
     }
 };
 
+/// NVMe Identify Controller (CNS 01h) 前 270 字节头结构（NVMe Base Spec Fig. 247）：
+/// 显式结构化映射 WCTEMP（偏移 266）与 CCTEMP（偏移 268），并在底部 comptime 断言校验，避免裸偏移读取。
+pub const NVME_IDENTIFY_CONTROLLER_HEAD = extern struct {
+    ReservedPrefix: [266]u8,
+    WCTEMP: [2]u8, // Warning Composite Temperature Threshold (Kelvin, LE u16)
+    CCTEMP: [2]u8, // Critical Composite Temperature Threshold (Kelvin, LE u16)
+
+    pub fn wctempKelvin(self: *const NVME_IDENTIFY_CONTROLLER_HEAD) u16 {
+        return std.mem.readInt(u16, &self.WCTEMP, .little);
+    }
+
+    pub fn cctempKelvin(self: *const NVME_IDENTIFY_CONTROLLER_HEAD) u16 {
+        return std.mem.readInt(u16, &self.CCTEMP, .little);
+    }
+
+    pub fn wctempCelsius(self: *const NVME_IDENTIFY_CONTROLLER_HEAD) ?i32 {
+        const k = self.wctempKelvin();
+        return if (k >= 200 and k <= 500) @as(i32, k) - 273 else null;
+    }
+
+    pub fn cctempCelsius(self: *const NVME_IDENTIFY_CONTROLLER_HEAD) ?i32 {
+        const k = self.cctempKelvin();
+        return if (k >= 200 and k <= 500) @as(i32, k) - 273 else null;
+    }
+};
+
 /// ATA_PASS_THROUGH_EX (ntddscsi.h, x64 layout)
 pub const ATA_FLAGS_DRDY_REQUIRED: WORD = 1 << 0;
 pub const ATA_FLAGS_DATA_IN: WORD = 1 << 1;
@@ -904,6 +930,23 @@ comptime {
     std.debug.assert(@offsetOf(SCSI_PASS_THROUGH_DIRECT, "Cdb") == 36);
     std.debug.assert(@sizeOf(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) == 48);
     std.debug.assert(@offsetOf(PDH_FMT_COUNTERVALUE, "doubleValue") == 8);
+
+    // 补齐审计 F-6 / F-8 提及的其余关键 Win32 / NVMe 结构体 comptime 布局校验
+    std.debug.assert(@sizeOf(NVME_IDENTIFY_CONTROLLER_HEAD) == 270);
+    std.debug.assert(@offsetOf(NVME_IDENTIFY_CONTROLLER_HEAD, "WCTEMP") == 266);
+    std.debug.assert(@offsetOf(NVME_IDENTIFY_CONTROLLER_HEAD, "CCTEMP") == 268);
+
+    std.debug.assert(@sizeOf(STORAGE_DEVICE_DESCRIPTOR) == 40);
+    std.debug.assert(@offsetOf(STORAGE_DEVICE_DESCRIPTOR, "SerialNumberOffset") == 24);
+    std.debug.assert(@offsetOf(STORAGE_DEVICE_DESCRIPTOR, "BusType") == 28);
+
+    std.debug.assert(@sizeOf(DISK_GEOMETRY) == 24);
+    std.debug.assert(@sizeOf(DISK_GEOMETRY_EX) == 40);
+    std.debug.assert(@offsetOf(DISK_GEOMETRY_EX, "DiskSize") == 24);
+
+    std.debug.assert(@sizeOf(SYSTEM_POWER_STATUS) == 12);
+    std.debug.assert(@offsetOf(SYSTEM_POWER_STATUS, "BatteryLifePercent") == 2);
+    std.debug.assert(@sizeOf(DISPLAY_DEVICEW) == 840);
 }
 
 test "Win32 comptime struct layouts and NVMe health parser helpers" {

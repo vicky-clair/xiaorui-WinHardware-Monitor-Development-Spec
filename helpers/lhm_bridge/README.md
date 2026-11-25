@@ -13,6 +13,8 @@
 
 ## 构建命令
 
+目标框架为 `net48`（Windows 10 / 11 系统原生内置 `.NET Framework 4.8`，用户端无需额外安装 .NET 8 运行库）：
+
 ```powershell
-dotnet publish helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -r win-x64 -o zig-out/bin
+dotnet build helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -o zig-out/bin
 ```

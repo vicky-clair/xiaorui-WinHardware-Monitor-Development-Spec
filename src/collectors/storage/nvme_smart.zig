@@ -183,11 +183,10 @@ pub fn readNvmeSmart(drive_index: u32) NvmeSmartData {
     if (win32.DeviceIoControl(handle, win32.IOCTL_STORAGE_QUERY_PROPERTY, &id_buf, id_total, &id_buf, id_total, &id_ret, null) != 0) {
         const id_out: *const win32.STORAGE_PROTOCOL_DATA_DESCRIPTOR = @ptrCast(@alignCast(&id_buf));
         const dstart = @offsetOf(win32.STORAGE_PROTOCOL_DATA_DESCRIPTOR, "ProtocolSpecificData") + id_out.ProtocolSpecificData.ProtocolDataOffset;
-        if (dstart + 270 <= id_buf.len) {
-            const wctemp = std.mem.readInt(u16, id_buf[dstart + 266 ..][0..2], .little);
-            const cctemp = std.mem.readInt(u16, id_buf[dstart + 268 ..][0..2], .little);
-            if (wctemp >= 200 and wctemp <= 500) result.wctemp_c = @as(i32, wctemp) - 273;
-            if (cctemp >= 200 and cctemp <= 500) result.cctemp_c = @as(i32, cctemp) - 273;
+        if (dstart + @sizeOf(win32.NVME_IDENTIFY_CONTROLLER_HEAD) <= id_buf.len) {
+            const id_head: *const win32.NVME_IDENTIFY_CONTROLLER_HEAD = @ptrCast(@alignCast(id_buf[dstart..].ptr));
+            result.wctemp_c = id_head.wctempCelsius();
+            result.cctemp_c = id_head.cctempCelsius();
         }
     }
 
@@ -259,4 +258,13 @@ test "parseLogPage02 parses 512-byte NVMe SMART binary fixture accurately" {
     try std.testing.expectEqual(@as(u128, 3), parsed.media_errors);
     try std.testing.expectEqual(@as(?i32, 47), parsed.temp_sensors_c[0]);
     try std.testing.expectApproxEqAbs(@as(f64, 5.12), parsed.bytesWrittenTB(), 1e-6);
+}
+
+test "NVME_IDENTIFY_CONTROLLER_HEAD parses WCTEMP and CCTEMP at comptime-verified offsets" {
+    var raw: [270]u8 align(2) = std.mem.zeroes([270]u8);
+    std.mem.writeInt(u16, raw[266..268], 353, .little); // 80°C
+    std.mem.writeInt(u16, raw[268..270], 358, .little); // 85°C
+    const head: *const win32.NVME_IDENTIFY_CONTROLLER_HEAD = @ptrCast(@alignCast(&raw));
+    try std.testing.expectEqual(@as(?i32, 80), head.wctempCelsius());
+    try std.testing.expectEqual(@as(?i32, 85), head.cctempCelsius());
 }

@@ -32,7 +32,8 @@ test {
     _ = @import("collectors/storage/nvme_smart.zig");
     _ = @import("collectors/storage/ata_smart.zig");
 
-    // 平台封装、配置服务与状态机
+    // 平台封装、配置服务、CLI 与状态机
+    _ = @import("cli.zig");
     _ = @import("platform/single_instance.zig");
     _ = @import("platform/tray.zig");
     _ = @import("platform/autostart.zig");

@@ -263,15 +263,16 @@ fn testNvmeQuery(handle: win32.HANDLE, tag: []const u8) void {
     if (win32.DeviceIoControl(handle, win32.IOCTL_STORAGE_QUERY_PROPERTY, &id_buf, id_total, &id_buf, id_total, &id_ret, null) != 0) {
         const out_desc: *const win32.STORAGE_PROTOCOL_DATA_DESCRIPTOR = @ptrCast(@alignCast(&id_buf));
         const dstart = @offsetOf(win32.STORAGE_PROTOCOL_DATA_DESCRIPTOR, "ProtocolSpecificData") + out_desc.ProtocolSpecificData.ProtocolDataOffset;
-        if (dstart + 270 <= id_buf.len) {
-            const wctemp = std.mem.readInt(u16, id_buf[dstart + 266 ..][0..2], .little);
-            const cctemp = std.mem.readInt(u16, id_buf[dstart + 268 ..][0..2], .little);
-            std.debug.print("    [NVMe Identify ({s})] OK! WCTEMP={d}K ({d}°C), CCTEMP={d}K ({d}°C)\n", .{
+        if (dstart + @sizeOf(win32.NVME_IDENTIFY_CONTROLLER_HEAD) <= id_buf.len) {
+            const id_head: *const win32.NVME_IDENTIFY_CONTROLLER_HEAD = @ptrCast(@alignCast(id_buf[dstart..].ptr));
+            const wctemp = id_head.wctempKelvin();
+            const cctemp = id_head.cctempKelvin();
+            std.debug.print("    [NVMe Identify ({s})] OK! WCTEMP={d}K ({?d}°C), CCTEMP={d}K ({?d}°C)\n", .{
                 tag,
                 wctemp,
-                if (wctemp > 273) @as(i32, wctemp) - 273 else 0,
+                id_head.wctempCelsius(),
                 cctemp,
-                if (cctemp > 273) @as(i32, cctemp) - 273 else 0,
+                id_head.cctempCelsius(),
             });
         }
     } else {

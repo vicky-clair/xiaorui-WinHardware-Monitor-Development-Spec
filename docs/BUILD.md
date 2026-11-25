@@ -91,10 +91,10 @@ sudo ./zig-out/bin/winhardware-monitor --cli --lang en
 
 ### A. Windows 打包（便携版 ZIP + Inno Setup 安装包）
 ```powershell
-# 单独发布可选 MPL-2.0 LibreHardwareMonitor 辅助进程（单文件 WinExe）
-dotnet publish helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -r win-x64 -o zig-out/bin
+# 单独构建可选 MPL-2.0 LibreHardwareMonitor 辅助进程（基于 Win10/11 原生内置 .NET Framework 4.8，无需用户安装 .NET 8）
+dotnet build helpers/lhm_bridge/WinHardwareMonitor.LhmHelper.csproj -c Release -o zig-out/bin
 
-# 一键执行：单元测试 + Debug/ReleaseSafe 构建 + LHM 发布 + 便携版 ZIP + Inno Setup 安装包 + SHA256SUMS.txt
+# 一键执行：单元测试 + Debug/ReleaseSafe (-Dcpu=baseline) 构建 + LHM 构建 + 便携版 ZIP + Inno Setup 安装包 + SHA256SUMS.txt
 powershell -NoProfile -ExecutionPolicy Bypass -File packaging/windows/build_release.ps1
 ```
 默认输出至 `dist/`（已加入 `.gitignore`，不提交至 Git 仓库）：
