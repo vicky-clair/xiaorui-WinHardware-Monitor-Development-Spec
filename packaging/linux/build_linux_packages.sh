@@ -11,11 +11,11 @@ DIST_DIR="${REPO_ROOT}/dist-linux"
 
 cd "${REPO_ROOT}"
 
-echo "=== [1/6] 运行 Zig 单元测试、Debug 与 ReleaseSafe (-Dcpu=baseline) 构建 ==="
+echo "=== [1/6] 运行 Zig 单元测试、Debug 与通用 Linux ReleaseSafe (-Dtarget=x86_64-linux-gnu.2.17 -Dcpu=baseline) 构建 ==="
 "${ZIG_BIN}" build test
 "${ZIG_BIN}" build
-# 强制使用 -Dcpu=baseline（标准 x86-64 SSE2），确保通用兼容任意 x86_64 Linux 处理器
-"${ZIG_BIN}" build -Doptimize=ReleaseSafe -Dcpu=baseline
+# 强制锁定 GLIBC 2.17 + x86-64 baseline（SSE2），确保单一二进制兼容 CentOS 7 / RHEL 8-9 / Debian 10-13 / Ubuntu 18.04-24.04 / Fedora / openSUSE / Arch / 麒麟 / UOS 等所有主流 x86_64 glibc 发行版
+"${ZIG_BIN}" build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-gnu.2.17 -Dcpu=baseline
 
 BIN_PATH="${REPO_ROOT}/zig-out/bin/winhardware-monitor"
 chmod +x "${BIN_PATH}"
@@ -24,7 +24,13 @@ if command -v strip >/dev/null 2>&1; then
 fi
 mkdir -p "${DIST_DIR}"
 
-echo "=== [2/6] 执行无界面 CLI 真实硬件采集自检 ==="
+echo "=== [2/6] 校验 ELF 兼容性（GLIBC 版本 / 动态库）并执行无界面 CLI 真实硬件采集自检 ==="
+if command -v readelf >/dev/null 2>&1; then
+  echo "--- DT_NEEDED ---"
+  readelf -d "${BIN_PATH}" | grep -E 'NEEDED' || true
+  echo "--- GLIBC SYMBOL VERSIONS ---"
+  readelf --version-info "${BIN_PATH}" | grep -oE 'GLIBC_[0-9.]+' | sort -Vu || true
+fi
 "${BIN_PATH}" --cli
 
 echo "=== [3/6] 打包便携版 .tar.gz ==="
@@ -67,7 +73,8 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Installed-Size: ${INSTALLED_KB}
-Depends: libc6, libgl1, libx11-6, libxrandr2, libxinerama1, libxcursor1, libxi6
+Depends: libc6 (>= 2.17)
+Recommends: libgl1, libx11-6, libxrandr2, libxinerama1, libxcursor1, libxi6
 Maintainer: WinHardware Monitor Contributors <noreply@example.com>
 Description: Lightweight hardware temperature, disk SMART health monitor and benchmark tool
  Supports real-time Linux hwmon temperature monitoring, NVMe/ATA/SAT SMART

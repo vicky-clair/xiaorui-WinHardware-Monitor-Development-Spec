@@ -75,9 +75,9 @@ zig build verify-p0
 
 ### Linux Bash
 ```bash
-# 运行全部单元测试与 ReleaseSafe 通用发布构建（-Dcpu=baseline）
+# 运行全部单元测试与 ReleaseSafe 通用发布构建（锁定 GLIBC 2.17 + x86-64 baseline）
 zig build test
-zig build -Doptimize=ReleaseSafe -Dcpu=baseline
+zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-gnu.2.17 -Dcpu=baseline
 
 # 无界面 CLI 硬件信息采集与 V2.2 基准测试（支持 --lang zh|en|ja）
 ./zig-out/bin/winhardware-monitor --cli --lang zh

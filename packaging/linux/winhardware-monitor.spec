@@ -10,6 +10,7 @@ License:        Apache-2.0
 URL:            https://github.com/vicky-clair/xiaorui-WinHardware-Monitor-Development-Spec
 
 ExclusiveArch:  x86_64
+Recommends:     libGL, libX11, libXrandr, libXinerama, libXcursor, libXi
 
 %description
 WinHardware Monitor is a lightweight, zero-driver hardware temperature,

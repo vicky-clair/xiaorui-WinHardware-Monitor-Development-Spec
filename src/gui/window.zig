@@ -102,7 +102,19 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
     msg_wnd.init() catch {};
     defer msg_wnd.deinit();
 
-    try zglfw.init();
+    zglfw.init() catch |err| {
+        if (builtin.os.tag != .windows) {
+            std.debug.print(
+                "[WinHardware Monitor] GLFW 图形界面初始化失败 ({s})。\n" ++
+                    "若处于无桌面服务器/SSH 终端（无 DISPLAY），请使用无界面命令行模式：\n" ++
+                    "  winhardware-monitor --cli\n" ++
+                    "  winhardware-monitor --bench all\n" ++
+                    "若处于桌面环境，请确认已安装 X11/XWayland 与 libGL（Mesa）驱动。\n",
+                .{@errorName(err)},
+            );
+        }
+        return err;
+    };
     defer zglfw.terminate();
 
     // 关键修复（解决管理员启动白屏/白闪）：
@@ -119,6 +131,13 @@ pub fn runMainWindow(allocator: std.mem.Allocator, opts: RunOptions) !void {
             );
             const cap = std.unicode.utf8ToUtf16LeStringLiteral("WinHardware Monitor - 启动失败");
             _ = win32.MessageBoxW(null, msg, cap, 0x10);
+        } else {
+            std.debug.print(
+                "[WinHardware Monitor] 无法创建 OpenGL 3.3 Core 窗口上下文。\n" ++
+                    "若处于桌面环境，请确认 X11/XWayland（DISPLAY）与 libGL/Mesa 驱动正常；\n" ++
+                    "若处于无桌面服务器/SSH 终端，请改用命令行模式：winhardware-monitor --cli 或 --bench all\n",
+                .{},
+            );
         }
         return error.OpenGLContextFailed;
     };

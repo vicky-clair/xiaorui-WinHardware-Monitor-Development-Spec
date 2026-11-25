@@ -2,6 +2,7 @@
 //! 负责静态编译 SQLite 3.53.2、链接 zgui (Dear ImGui + ImPlot) / zglfw / zopengl、
 //! 构建主桌面程序（Windows GUI 子系统无黑框）、P0 验证工具以及全部单元测试。
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -133,7 +134,6 @@ fn wireModules(
 
     mod.linkLibrary(zgui_dep.artifact("imgui"));
     mod.linkLibrary(zglfw_dep.artifact("glfw"));
-    mod.linkLibrary(zopengl_dep.artifact("zopengl"));
     mod.linkLibrary(sqlite_lib);
 
     linkPlatformLibs(mod, true);
@@ -156,17 +156,18 @@ fn linkPlatformLibs(mod: *std.Build.Module, with_gui: bool) void {
             mod.linkSystemLibrary("dwmapi", .{});
             mod.linkSystemLibrary("ntdll", .{});
         } else if (t.result.os.tag == .linux) {
+            // Linux 下 zglfw 在运行时通过 dlopen 动态加载 libX11 / libGL / libEGL 等图形库，
+            // 仅 zglfw 静态库声明了 -lX11；当在 Linux 宿主机使用 -Dtarget=x86_64-linux-gnu.2.17 锁定低版本 glibc 时，
+            // 补充 Debian/Ubuntu (/usr/lib/x86_64-linux-gnu) 与 Fedora/RHEL (/usr/lib64) 库搜索路径以完成链接（实际运行时零 X11 硬依赖）。
+            _ = with_gui;
+            if (builtin.os.tag == .linux and !t.query.isNative()) {
+                mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+                mod.addLibraryPath(.{ .cwd_relative = "/usr/lib64" });
+                mod.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+            }
             mod.linkSystemLibrary("m", .{});
             mod.linkSystemLibrary("pthread", .{});
             mod.linkSystemLibrary("dl", .{});
-            if (with_gui) {
-                mod.linkSystemLibrary("GL", .{});
-                mod.linkSystemLibrary("X11", .{});
-                mod.linkSystemLibrary("Xrandr", .{});
-                mod.linkSystemLibrary("Xinerama", .{});
-                mod.linkSystemLibrary("Xcursor", .{});
-                mod.linkSystemLibrary("Xi", .{});
-            }
         }
     }
 }
